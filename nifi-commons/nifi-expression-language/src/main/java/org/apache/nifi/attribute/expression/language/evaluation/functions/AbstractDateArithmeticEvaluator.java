@@ -34,20 +34,28 @@ import java.util.Date;
  * <p>Handles literal-argument validation at construction time and the common
  * evaluate-and-convert logic. Subclasses only provide the arithmetic direction
  * via {@link #applyAmount(ZonedDateTime, String)}.</p>
+ *
+ * <p>An optional timezone evaluator may be provided so that DST-sensitive calendar units
+ * (days, weeks, months, years) are applied at the correct wall-clock time rather than
+ * as a fixed-length instant offset. When omitted, the system default timezone is used.</p>
  */
 abstract class AbstractDateArithmeticEvaluator extends DateEvaluator {
 
     private final Evaluator<Date> subject;
     private final Evaluator<String> amountEvaluator;
+    private final Evaluator<String> timeZoneEvaluator;
 
     /**
-     * @param subject         the date-producing evaluator to operate on
-     * @param amountEvaluator the evaluator producing the amount expression string
+     * @param subject           the date-producing evaluator to operate on
+     * @param amountEvaluator   the evaluator producing the amount expression string
+     * @param timeZoneEvaluator optional timezone evaluator (e.g. a timezone ID string); may be {@code null}
      */
     protected AbstractDateArithmeticEvaluator(final Evaluator<Date> subject,
-                                              final Evaluator<String> amountEvaluator) {
+                                              final Evaluator<String> amountEvaluator,
+                                              final Evaluator<String> timeZoneEvaluator) {
         this.subject = subject;
         this.amountEvaluator = amountEvaluator;
+        this.timeZoneEvaluator = timeZoneEvaluator;
 
         if (amountEvaluator instanceof StringLiteralEvaluator) {
             DateAmountParser.validate(
@@ -66,8 +74,16 @@ abstract class AbstractDateArithmeticEvaluator extends DateEvaluator {
         }
 
         final String amountExpression = amountEvaluator.evaluate(evaluationContext).getValue();
-        final ZonedDateTime zonedDateTime = ZonedDateTime.ofInstant(
-                subjectValue.toInstant(), ZoneId.systemDefault());
+
+        ZoneId zoneId = ZoneId.systemDefault();
+        if (timeZoneEvaluator != null) {
+            final String tz = timeZoneEvaluator.evaluate(evaluationContext).getValue();
+            if (tz != null) {
+                zoneId = ZoneId.of(tz);
+            }
+        }
+
+        final ZonedDateTime zonedDateTime = ZonedDateTime.ofInstant(subjectValue.toInstant(), zoneId);
         final ZonedDateTime result = applyAmount(zonedDateTime, amountExpression);
 
         return new DateQueryResult(Date.from(result.toInstant()));
