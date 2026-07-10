@@ -26,6 +26,7 @@ import { CanvasRoutingModule } from './canvas-routing.module';
 import { HeaderComponent } from './header/header.component';
 import { FooterComponent } from './footer/footer.component';
 import { FlowAnalysisDrawerComponent } from './header/flow-analysis-drawer/flow-analysis-drawer.component';
+import { CopilotChatComponent } from './copilot-chat/copilot-chat.component';
 import { OverlappingConnectionsBannerComponent } from '../../../../ui/common/overlapping-connections-banner/overlapping-connections-banner.component';
 
 @NgModule({
@@ -44,6 +45,7 @@ import { OverlappingConnectionsBannerComponent } from '../../../../ui/common/ove
         FooterComponent,
         MatSidenavModule,
         FlowAnalysisDrawerComponent,
+        CopilotChatComponent,
         OverlappingConnectionsBannerComponent
     ]
 })

@@ -47,6 +47,7 @@ import {
     selectCurrentProcessGroupId,
     selectEditedCurrentProcessGroup,
     selectFlowAnalysisOpen,
+    selectCopilotChatOpen,
     selectFlowLoadingStatus,
     selectFunnel,
     selectInputPort,
@@ -103,6 +104,7 @@ export class Canvas implements OnInit, OnDestroy {
     private canvasClicked = false;
 
     flowAnalysisOpen = this.store.selectSignal(selectFlowAnalysisOpen);
+    copilotChatOpen = this.store.selectSignal(selectCopilotChatOpen);
     navigationCollapsed = this.store.selectSignal(selectNavigationCollapsed);
     operationCollapsed = this.store.selectSignal(selectOperationCollapsed);
     overlappingConnections$ = this.store.select(selectOverlappingConnections);

@@ -64,6 +64,7 @@ import {
     setAllowTransition,
     setDragging,
     setFlowAnalysisOpen,
+    setCopilotChatOpen,
     setNavigationCollapsed,
     setOperationCollapsed,
     setRegistryClients,
@@ -176,6 +177,7 @@ export const initialState: FlowState = {
     navigationCollapsed: false,
     operationCollapsed: false,
     flowAnalysisOpen: false,
+    copilotChatOpen: false,
     status: 'pending'
 };
 
@@ -569,6 +571,10 @@ export const flowReducer = createReducer(
     on(setFlowAnalysisOpen, (state, { flowAnalysisOpen }) => ({
         ...state,
         flowAnalysisOpen
+    })),
+    on(setCopilotChatOpen, (state, { copilotChatOpen }) => ({
+        ...state,
+        copilotChatOpen
     })),
     on(
         startComponentSuccess,

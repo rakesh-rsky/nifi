@@ -32,6 +32,7 @@
                 <include>*:nifi-per-process-group-logging</include>
                 <include>*:nifi-single-user-utils</include>
                 <include>*:nifi-flow-encryptor</include>
+                <include>*:bcprov-jdk18on</include>
             </includes>
         </dependencySet>
 
@@ -162,6 +163,18 @@
             <useTransitiveDependencies>false</useTransitiveDependencies>
             <includes>
                 <include>org.apache.nifi:*:nar</include>
+            </includes>
+        </dependencySet>
+
+        <!-- Write out the NiFi Copilot backend executable jar (only present when -Pinternal-copilot is active) -->
+        <dependencySet>
+            <scope>runtime</scope>
+            <outputDirectory>nifi-copilot</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <useTransitiveDependencies>false</useTransitiveDependencies>
+            <useStrictFiltering>false</useStrictFiltering>
+            <includes>
+                <include>org.apache.nifi:nifi-copilot</include>
             </includes>
         </dependencySet>
     </dependencySets>

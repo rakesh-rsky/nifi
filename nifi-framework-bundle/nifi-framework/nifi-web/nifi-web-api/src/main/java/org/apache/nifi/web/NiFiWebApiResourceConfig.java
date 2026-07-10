@@ -106,6 +106,9 @@ public class NiFiWebApiResourceConfig extends ResourceConfig {
         register(ctx.getBean("parameterContextResource"));
         register(ctx.getBean("parameterProviderResource"));
         register(ctx.getBean("connectorResource"));
+        if (ctx.containsBean("copilotResource")) {
+            register(ctx.getBean("copilotResource"));
+        }
 
         // exception mappers
         register(AccessDeniedExceptionMapper.class);

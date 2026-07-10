@@ -67,11 +67,16 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.context.annotation.Import;
 
-@ComponentScan(basePackageClasses = {
-        ComponentDAO.class,
-        NiFiAuditor.class,
-        ApplicationResource.class
-})
+@ComponentScan(
+        basePackageClasses = {
+                ComponentDAO.class,
+                NiFiAuditor.class,
+                ApplicationResource.class
+        },
+        basePackages = {
+                "org.apache.nifi.copilot"   // scanned when nifi-copilot is on the classpath (-Pinternal-copilot)
+        }
+)
 @Import({
         StandardAuthorizableLookup.class,
         StandardNiFiServiceFacade.class

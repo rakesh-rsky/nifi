@@ -23,5 +23,8 @@ nb-configuration.xml
 __pycache__
 .cursor/debug.log
 
+# NiFi Copilot — runtime artifacts
+nifi-copilot/data/
+
 # Develocity
 .mvn/.develocity/

@@ -42,6 +42,11 @@
                 <configuration>
                     <!-- Enable parameters for AspectJ Around annotation argument name resolution -->
                     <parameters>true</parameters>
+                    <!-- Copilot source files require nifi-copilot on the classpath; excluded unless -Pinternal-copilot is active -->
+                    <excludes>
+                        <exclude>org/apache/nifi/web/api/CopilotResource.java</exclude>
+                        <exclude>org/apache/nifi/web/api/InternalNiFiClient.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -544,4 +549,44 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <!-- Include the embedded NiFi Copilot classes in nifi-web-api (inactive by default; activate with -Pinternal-copilot) -->
+    <profiles>
+        <profile>
+            <id>internal-copilot</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <parameters>true</parameters>
+                            <!-- Remove the default excludes so CopilotResource and InternalNiFiClient are compiled -->
+                            <excludes combine.self="override"/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.nifi</groupId>
+                    <artifactId>nifi-copilot</artifactId>
+                    <version>2.10.0-SNAPSHOT</version>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-web</artifactId>
+                        </exclusion>
+                        <exclusion>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-starter-validation</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>

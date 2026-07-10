@@ -934,6 +934,21 @@ language governing permissions and limitations under the License. -->
         </dependency>
     </dependencies>
     <profiles>
+        <!-- Include the embedded NiFi Copilot jar in the assembly (inactive by default; activate with -Pinternal-copilot) -->
+        <profile>
+            <id>internal-copilot</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.nifi</groupId>
+                    <artifactId>nifi-copilot</artifactId>
+                    <version>2.10.0-SNAPSHOT</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
         <profile>
             <id>include-graph</id>
             <activation>
