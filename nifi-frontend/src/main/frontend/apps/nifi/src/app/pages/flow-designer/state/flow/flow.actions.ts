@@ -599,6 +599,11 @@ export const setFlowAnalysisOpen = createAction(
     props<{ flowAnalysisOpen: boolean }>()
 );
 
+export const setCopilotChatOpen = createAction(
+    `${CANVAS_PREFIX} Set Copilot Chat Open`,
+    props<{ copilotChatOpen: boolean }>()
+);
+
 /*
     General
  */

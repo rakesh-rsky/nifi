@@ -1,0 +1,387 @@
+<!--
+  ~ Licensed to the Apache Software Foundation (ASF) under one or more
+  ~ contributor license agreements.  See the NOTICE file distributed with
+  ~ this work for additional information regarding copyright ownership.
+  ~ The ASF licenses this file to You under the Apache License, Version 2.0
+  ~ (the "License"); you may not use this file except in compliance with
+  ~ the License.  You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+
+<div class="copilot-panel flex flex-col h-full" [style.width.px]="panelWidth">
+
+    <!-- ── Resize handle (drag left edge to resize) ────────────────────── -->
+    <div class="resize-handle" (mousedown)="onResizeStart($event)"></div>
+
+    <!-- ── Header (always visible) ─────────────────────────────── -->
+    <div class="copilot-header flex items-center justify-between px-3 py-2 border-b">
+        <div class="flex items-center gap-x-2">
+            <svg class="copilot-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+                <!-- AI sparkle icon — provider-neutral -->
+                <path d="M8 1L9.5 6.5L15 8L9.5 9.5L8 15L6.5 9.5L1 8L6.5 6.5Z"/>
+                <path d="M13 2L13.5 3.5L15 4L13.5 4.5L13 6L12.5 4.5L11 4L12.5 3.5Z" opacity="0.7"/>
+                <path d="M3.5 10.5L3.9 11.6L5 12L3.9 12.4L3.5 13.5L3.1 12.4L2 12L3.1 11.6Z" opacity="0.7"/>
+            </svg>
+            <div class="flex flex-col">
+                <span class="copilot-title font-semibold text-xs leading-tight">AI Copilot</span>
+                <span class="copilot-subtitle text-xs leading-tight">for Apache NiFi</span>
+            </div>
+        </div>
+        <div class="flex items-center gap-x-1">
+            @if (authState === 'authenticated') {
+                @if (provider === 'github') {
+                    <span class="login-badge text-xs px-2 py-0.5 rounded-full">&#64;{{ githubLogin }}</span>
+                } @else {
+                    <span class="login-badge aws-badge text-xs px-2 py-0.5 rounded-full" [matTooltip]="awsBadge">
+                        ☁ AWS
+                    </span>
+                }
+                <button mat-icon-button class="h-7 w-7" matTooltip="Clear chat" (click)="clearChat()">
+                    <i class="fa fa-trash-o text-xs"></i>
+                </button>
+                <button mat-icon-button class="h-7 w-7" matTooltip="Sign out" (click)="signOut()">
+                    <i class="fa fa-sign-out text-xs"></i>
+                </button>
+            }
+            <button mat-icon-button class="h-7 w-7" matTooltip="Close" (click)="close()">
+                <i class="fa fa-times text-xs"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- ── STATE: checking ─────────────────────────────────────── -->
+    @if (authState === 'checking') {
+        <div class="auth-panel flex flex-col items-center justify-center flex-1 gap-y-4 p-6">
+            <mat-spinner diameter="32"></mat-spinner>
+            <span class="text-sm secondary-color">Connecting…</span>
+        </div>
+    }
+
+    <!-- ── STATE: unauthenticated — provider choice ────────────── -->
+    @if (authState === 'unauthenticated') {
+        <div class="auth-panel flex flex-col items-center justify-center flex-1 gap-y-6 p-6 text-center">
+            <div>
+                <p class="font-semibold text-sm mb-1">AI Copilot for NiFi</p>
+                <p class="text-xs secondary-color leading-relaxed">
+                    Choose your AI provider to start building NiFi flows using natural language.
+                </p>
+            </div>
+
+            <!-- GitHub option -->
+            <div class="provider-card w-full rounded-lg p-4 flex flex-col gap-y-3">
+                <div class="flex items-center gap-x-3">
+                    <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor" class="provider-icon">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                                 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+                                 -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87
+                                 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+                                 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                                 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04
+                                 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15
+                                 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01
+                                 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    <div class="text-left">
+                        <p class="font-semibold text-xs">GitHub Models</p>
+                        <p class="text-xs secondary-color">GPT-4o via GitHub OAuth</p>
+                    </div>
+                </div>
+                <button class="signin-btn flex items-center justify-center gap-x-2 px-4 py-2 rounded font-medium text-sm w-full"
+                        (click)="signIn()">
+                    Sign in with GitHub
+                </button>
+            </div>
+
+            <!-- AWS Bedrock option -->
+            <div class="provider-card w-full rounded-lg p-4 flex flex-col gap-y-3">
+                <div class="flex items-center gap-x-3">
+                    <span class="provider-icon text-2xl leading-none">☁</span>
+                    <div class="text-left">
+                        <p class="font-semibold text-xs">Amazon Bedrock</p>
+                        <p class="text-xs secondary-color">Claude via AWS IAM Identity Center</p>
+                    </div>
+                </div>
+                <button class="aws-signin-btn flex items-center justify-center gap-x-2 px-4 py-2 rounded font-medium text-sm w-full"
+                        (click)="showAWSForm()">
+                    Sign in with AWS
+                </button>
+            </div>
+        </div>
+    }
+
+    <!-- ── STATE: aws_form — SSO start URL entry ───────────────── -->
+    @if (authState === 'aws_form') {
+        <div class="auth-panel flex flex-col flex-1 gap-y-4 p-5">
+            <div>
+                <p class="font-semibold text-sm mb-1">Connect with Amazon Bedrock</p>
+                <p class="text-xs secondary-color leading-relaxed">
+                    Enter your AWS IAM Identity Center (SSO) start URL.
+                    You'll authorize in a browser tab using your AWS credentials.
+                </p>
+            </div>
+
+            <div class="flex flex-col gap-y-3">
+                <div class="flex flex-col gap-y-1">
+                    <label class="text-xs font-medium">SSO Start URL <span class="text-red-500">*</span></label>
+                    <input class="copilot-input text-xs px-3 py-2 rounded"
+                           placeholder="https://d-xxxxxxxxxx.awsapps.com/start"
+                           [(ngModel)]="awsSsoStartUrl" />
+                </div>
+                <div class="flex gap-x-2">
+                    <div class="flex flex-col gap-y-1 flex-1">
+                        <label class="text-xs font-medium">SSO Region</label>
+                        <input class="copilot-input text-xs px-3 py-2 rounded"
+                               placeholder="us-east-1"
+                               [(ngModel)]="awsSsoRegion" />
+                    </div>
+                    <div class="flex flex-col gap-y-1 flex-1">
+                        <label class="text-xs font-medium">Bedrock Region</label>
+                        <input class="copilot-input text-xs px-3 py-2 rounded"
+                               placeholder="same as SSO"
+                               [(ngModel)]="awsBedrockRegion" />
+                    </div>
+                </div>
+            </div>
+
+            @if (awsConnectError) {
+                <p class="text-xs text-red-500">{{ awsConnectError }}</p>
+            }
+
+            <div class="flex gap-x-2 mt-auto">
+                <button class="aws-signin-btn flex-1 px-4 py-2 rounded font-medium text-sm"
+                        [disabled]="awsConnecting || !awsSsoStartUrl.trim()"
+                        (click)="connectWithAWS()">
+                    @if (awsConnecting) { Connecting… } @else { Connect }
+                </button>
+                <button class="text-xs secondary-color underline"
+                        (click)="authState = 'unauthenticated'">Cancel</button>
+            </div>
+        </div>
+    }
+
+    <!-- ── STATE: device_flow — GitHub ────────────────────────── -->
+    @if (authState === 'device_flow') {
+        <div class="auth-panel flex flex-col items-center flex-1 gap-y-5 p-6 text-center">
+            <mat-spinner diameter="24"></mat-spinner>
+            <p class="font-semibold text-sm">Waiting for GitHub authorization…</p>
+
+            <div class="flex flex-col items-center gap-y-2 w-full">
+                <div class="status-pill flex items-center gap-x-2 text-xs px-3 py-1.5 rounded-full w-full justify-center">
+                    <span>🌐</span>
+                    <span>Browser opened to <strong>github.com/login/device</strong></span>
+                </div>
+                @if (codeCopied) {
+                    <div class="status-pill copied flex items-center gap-x-2 text-xs px-3 py-1.5 rounded-full w-full justify-center">
+                        <span>📋</span>
+                        <span>Code copied to clipboard!</span>
+                    </div>
+                }
+            </div>
+
+            <div class="device-code-box w-full rounded-lg p-4">
+                <p class="text-xs secondary-color mb-2">Enter this code in the browser tab:</p>
+                <div class="code-row flex items-center justify-between gap-x-2">
+                    <span class="device-code font-mono font-bold text-2xl tracking-widest flex-1 text-center">{{ githubUserCode }}</span>
+                    <button class="copy-btn px-3 py-1 rounded text-xs font-medium shrink-0" (click)="copyCode()">
+                        @if (codeCopied) { ✓ Copied } @else { Copy }
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex gap-x-2">
+                <button class="github-link-btn flex items-center justify-center gap-x-2 px-4 py-1.5 rounded text-xs font-medium flex-1"
+                        (click)="openGitHub()">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                                 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+                                 -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87
+                                 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+                                 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                                 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04
+                                 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15
+                                 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01
+                                 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    Reopen browser ↗
+                </button>
+                <button class="copy-url-btn px-3 py-1.5 rounded text-xs font-medium shrink-0"
+                        (click)="copyUrl('github')"
+                        [matTooltip]="githubUrlCopied ? 'Copied!' : 'Copy authorization URL'">
+                    @if (githubUrlCopied) { ✓ } @else { 🔗 }
+                </button>
+            </div>
+
+            @if (githubDeviceCountdown > 0) {
+                <p class="text-xs secondary-color">
+                    Code expires in <span class="font-mono">{{ formatCountdown(githubDeviceCountdown) }}</span>
+                </p>
+            }
+            <button class="text-xs secondary-color underline cursor-pointer"
+                    (click)="authState = 'unauthenticated'; stopAuthPolling()">Cancel</button>
+        </div>
+    }
+
+    <!-- ── STATE: aws_device_flow — AWS SSO ──────────────────── -->
+    @if (authState === 'aws_device_flow') {
+        <div class="auth-panel flex flex-col items-center flex-1 gap-y-5 p-6 text-center">
+            <mat-spinner diameter="24"></mat-spinner>
+            <p class="font-semibold text-sm">Waiting for AWS authorization…</p>
+
+            <div class="flex flex-col items-center gap-y-2 w-full">
+                <div class="status-pill flex items-center gap-x-2 text-xs px-3 py-1.5 rounded-full w-full justify-center">
+                    <span>🌐</span>
+                    <span>Browser opened to <strong>device.sso.amazonaws.com</strong></span>
+                </div>
+                @if (codeCopied) {
+                    <div class="status-pill copied flex items-center gap-x-2 text-xs px-3 py-1.5 rounded-full w-full justify-center">
+                        <span>📋</span>
+                        <span>Code copied to clipboard!</span>
+                    </div>
+                }
+            </div>
+
+            <div class="device-code-box w-full rounded-lg p-4">
+                <p class="text-xs secondary-color mb-2">Enter this code in the browser tab:</p>
+                <div class="code-row flex items-center justify-between gap-x-2">
+                    <span class="device-code font-mono font-bold text-2xl tracking-widest flex-1 text-center">{{ awsDeviceCode }}</span>
+                    <button class="copy-btn px-3 py-1 rounded text-xs font-medium shrink-0" (click)="copyCode()">
+                        @if (codeCopied) { ✓ Copied } @else { Copy }
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex gap-x-2">
+                <button class="aws-link-btn flex items-center justify-center gap-x-2 px-4 py-1.5 rounded text-xs font-medium flex-1"
+                        (click)="openAWSBrowser()">
+                    ☁ Reopen browser ↗
+                </button>
+                <button class="copy-url-btn px-3 py-1.5 rounded text-xs font-medium shrink-0"
+                        (click)="copyUrl('aws')"
+                        [matTooltip]="awsUrlCopied ? 'Copied!' : 'Copy authorization URL'">
+                    @if (awsUrlCopied) { ✓ } @else { 🔗 }
+                </button>
+            </div>
+
+            @if (awsDeviceCountdown > 0) {
+                <p class="text-xs secondary-color">
+                    Code expires in <span class="font-mono">{{ formatCountdown(awsDeviceCountdown) }}</span>
+                </p>
+            }
+            <button class="text-xs secondary-color underline cursor-pointer"
+                    (click)="authState = 'unauthenticated'; stopAuthPolling()">Cancel</button>
+        </div>
+    }
+
+    <!-- ── STATE: aws_role_select — pick account/role ─────────── -->
+    @if (authState === 'aws_role_select') {
+        <div class="auth-panel flex flex-col flex-1 gap-y-4 p-5">
+            <div>
+                <p class="font-semibold text-sm mb-1">Select AWS Role</p>
+                <p class="text-xs secondary-color">Multiple roles found. Choose one to use with Amazon Bedrock.</p>
+            </div>
+            <div class="flex flex-col gap-y-2 overflow-y-auto">
+                @for (role of awsAvailableRoles; track role.role_name + role.account_id) {
+                    <button class="role-card text-left px-4 py-3 rounded-lg text-xs"
+                            (click)="selectAWSRole(role.account_id, role.role_name)">
+                        <span class="font-medium block">{{ role.role_name }}</span>
+                        <span class="secondary-color">{{ role.account_name }} ({{ role.account_id }})</span>
+                    </button>
+                }
+            </div>
+            @if (awsConnectError) {
+                <p class="text-xs text-red-500">{{ awsConnectError }}</p>
+            }
+            <button class="text-xs secondary-color underline"
+                    (click)="authState = 'unauthenticated'">Cancel</button>
+        </div>
+    }
+
+    <!-- ── STATE: authenticated — Chat UI ─────────────────────── -->
+    @if (authState === 'authenticated') {
+        <div class="copilot-messages flex-1 overflow-y-auto p-3 flex flex-col gap-y-3">
+            @for (msg of messages; track $index) {
+                <div class="message-wrapper flex flex-col" [class.user-wrapper]="msg.role === 'user'">
+                    <div class="message-bubble text-sm"
+                         [class.user-bubble]="msg.role === 'user'"
+                         [class.assistant-bubble]="msg.role === 'assistant'"
+                         [class.error-bubble]="msg.error">
+                        <pre class="message-text">{{ msg.content }}</pre>
+                    </div>
+
+                    @if (msg.processors && msg.processors.length > 0) {
+                        <div class="created-processors mt-2">
+                            <div class="text-xs font-medium mb-1 secondary-color">✅ Created on canvas:</div>
+                            @for (p of msg.processors; track p.id) {
+                                <div class="processor-chip text-xs px-2 py-1 mb-1 rounded">
+                                    <span class="font-medium">{{ p.name }}</span>
+                                    <span class="secondary-color ml-1">({{ p.type.split('.').pop() }})</span>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (msg.tokensUsed) {
+                        <div class="token-usage mt-1">
+                            <span class="token-usage-label">↑ {{ msg.tokensUsed.input }}</span>
+                            <span class="token-usage-sep">·</span>
+                            <span class="token-usage-label">↓ {{ msg.tokensUsed.output }}</span>
+                            <span class="token-usage-sep">·</span>
+                            <span class="token-usage-total">{{ msg.tokensUsed.total }} tokens</span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (isLoading) {
+                <div class="flex items-center gap-x-2 assistant-bubble message-bubble text-sm">
+                    <mat-spinner diameter="14"></mat-spinner>
+                    <span class="secondary-color">Building your flow…</span>
+                </div>
+            }
+
+            <div #messagesEnd></div>
+        </div>
+
+        <div class="copilot-input-area border-t p-3">
+            <div class="model-selector-row flex items-center gap-x-2 mb-2">
+                <label class="text-xs secondary-color shrink-0">Model</label>
+                <select class="copilot-select flex-1 text-xs rounded px-2 py-1"
+                        [(ngModel)]="selectedModel">
+                    @for (m of availableModels; track m.id) {
+                        <option [value]="m.id">{{ m.label }}</option>
+                    }
+                </select>
+            </div>
+            <div class="input-wrapper flex items-end gap-x-2">
+                <textarea
+                    class="copilot-textarea flex-1 text-sm resize-none rounded px-3 py-2"
+                    rows="3"
+                    placeholder="Describe a flow… (Enter to send, Shift+Enter for new line)"
+                    [(ngModel)]="inputText"
+                    (keydown)="onKeyDown($event)"
+                    [disabled]="isLoading">
+                </textarea>
+                <button
+                    mat-icon-button
+                    class="send-btn"
+                    matTooltip="Send"
+                    [disabled]="!inputText.trim() || isLoading"
+                    (click)="sendMessage()">
+                    <i class="fa fa-paper-plane"></i>
+                </button>
+            </div>
+            <div class="text-xs secondary-color mt-1">
+                Process group: <span class="font-mono">{{ currentProcessGroupId || 'root' }}</span>
+            </div>
+        </div>
+    }
+
+</div>
+

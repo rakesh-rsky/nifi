@@ -130,6 +130,18 @@
         <div class="flex">
             <search [currentProcessGroupId]="currentProcessGroupId"></search>
             <button
+                class="copilot-chat-toggle w-8 border-l flex justify-center items-center pointer"
+                title="Toggle NiFi Copilot Chat"
+                [class.active]="copilotChatOpen"
+                (click)="toggleCopilotChat()">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <!-- AI sparkle icon — provider-neutral -->
+                    <path d="M8 1L9.5 6.5L15 8L9.5 9.5L8 15L6.5 9.5L1 8L6.5 6.5Z"/>
+                    <path d="M13 2L13.5 3.5L15 4L13.5 4.5L13 6L12.5 4.5L11 4L12.5 3.5Z" opacity="0.7"/>
+                    <path d="M3.5 10.5L3.9 11.6L5 12L3.9 12.4L3.5 13.5L3.1 12.4L2 12L3.1 11.6Z" opacity="0.7"/>
+                </svg>
+            </button>
+            <button
                 class="flow-analysis-notifications w-8 border-l flex justify-center items-center pointer"
                 (click)="toggleFlowAnalysis()"
                 [ngClass]="flowAnalysisNotificationClass">

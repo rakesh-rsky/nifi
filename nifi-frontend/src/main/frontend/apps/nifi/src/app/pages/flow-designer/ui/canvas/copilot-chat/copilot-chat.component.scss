@@ -1,0 +1,355 @@
+/*!
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// ── Panel shell ──────────────────────────────────────────────────────────────
+.copilot-panel {
+    // Width is set dynamically via [style.width.px] binding (default 360px, user-resizable)
+    min-width: 280px;
+    max-width: 900px;
+    position: relative;
+    background: var(--mat-sys-background);
+    color: var(--mat-sys-on-background);
+}
+
+// ── Resize handle ─────────────────────────────────────────────────────────────
+.resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    cursor: ew-resize;
+    z-index: 10;
+    transition: background 0.15s;
+
+    &:hover,
+    &:active {
+        background: var(--mat-sys-primary);
+        opacity: 0.5;
+    }
+}
+
+// ── Header ───────────────────────────────────────────────────────────────────
+.copilot-header {
+    background: var(--mat-sys-surface-container);
+    min-height: 44px;
+    border-bottom: 1px solid var(--mat-sys-outline-variant);
+}
+
+.copilot-icon {
+    color: var(--mat-sys-primary);
+}
+
+.copilot-title {
+    color: var(--mat-sys-on-surface);
+}
+
+.copilot-subtitle {
+    color: var(--mat-sys-on-surface-variant);
+}
+
+.login-badge {
+    background: var(--copilot-primary-tint);
+    border: 1px solid var(--copilot-primary-border);
+    color: var(--mat-sys-primary);
+}
+
+// ── Auth panels ──────────────────────────────────────────────────────────────
+.auth-panel {
+    background: var(--mat-sys-background);
+}
+
+// ── Provider cards (unauthenticated screen) ───────────────────────────────────
+.provider-card {
+    background: var(--mat-sys-surface-container);
+    border: 1px solid var(--mat-sys-outline-variant);
+}
+
+.provider-icon {
+    color: var(--mat-sys-on-surface-variant);
+    flex-shrink: 0;
+}
+
+// Sign-in button — GitHub green is intentional and brand-specific in both themes
+.signin-btn {
+    background: #238636;
+    color: #ffffff;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: #2ea043;
+    }
+}
+
+// AWS sign-in button — AWS orange brand color
+.aws-signin-btn {
+    background: #ff9900;
+    color: #000000;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: #ffad33;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+.aws-badge {
+    background: rgba(255, 153, 0, 0.15);
+    border-color: rgba(255, 153, 0, 0.4);
+    color: #ff9900;
+}
+
+// Input fields in the AWS form
+.copilot-input {
+    background: var(--mat-sys-surface);
+    color: var(--mat-sys-on-surface);
+    border: 1px solid var(--mat-sys-outline-variant);
+    outline: none;
+    font-family: inherit;
+    width: 100%;
+
+    &::placeholder {
+        color: var(--mat-sys-on-surface-variant);
+        font-size: 0.7rem;
+    }
+
+    &:focus {
+        border-color: var(--mat-sys-primary);
+    }
+}
+
+// Role picker cards (aws_role_select state)
+.role-card {
+    background: var(--mat-sys-surface-container);
+    border: 1px solid var(--mat-sys-outline-variant);
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--mat-sys-primary) 12%, var(--mat-sys-surface-container));
+        border-color: var(--mat-sys-primary);
+    }
+}
+
+// AWS device-flow reopen button
+.aws-link-btn {
+    background: rgba(255, 153, 0, 0.12);
+    border: 1px solid rgba(255, 153, 0, 0.35);
+    color: #ff9900;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: rgba(255, 153, 0, 0.22);
+    }
+}
+
+// Device-flow box
+.device-code-box {
+    background: var(--mat-sys-surface-container-high);
+    border: 1px solid var(--mat-sys-outline-variant);
+}
+
+// Status pills shown during device flow
+.status-pill {
+    background: var(--copilot-surface-tint);
+    border: 1px solid var(--mat-sys-outline-variant);
+    color: var(--mat-sys-on-surface-variant);
+
+    &.copied {
+        background: rgba(35, 134, 54, 0.15);
+        border-color: rgba(35, 134, 54, 0.4);
+        color: #7ee787; // GitHub green "success" — brand color, stays fixed
+    }
+}
+
+.device-code {
+    color: var(--mat-sys-on-surface);
+    letter-spacing: 0.25em;
+}
+
+.copy-btn {
+    background: var(--copilot-surface-tint);
+    color: var(--mat-sys-on-surface);
+    border: 1px solid var(--mat-sys-outline-variant);
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--mat-sys-on-surface) 15%, transparent);
+    }
+}
+
+.copy-url-btn {
+    background: var(--copilot-surface-tint);
+    color: var(--mat-sys-on-surface);
+    border: 1px solid var(--mat-sys-outline-variant);
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--mat-sys-on-surface) 15%, transparent);
+    }
+}
+
+.github-link-btn {
+    background: var(--copilot-primary-tint);
+    border: 1px solid var(--copilot-primary-border);
+    color: var(--mat-sys-primary);
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--mat-sys-primary) 22%, transparent);
+    }
+}
+
+// ── Messages ─────────────────────────────────────────────────────────────────
+.copilot-messages {
+    background: var(--mat-sys-background);
+}
+
+.message-bubble {
+    max-width: 95%;
+    border-radius: 8px;
+    padding: 8px 12px;
+    word-break: break-word;
+}
+
+.user-wrapper {
+    align-items: flex-end;
+}
+
+.user-bubble {
+    background: var(--mat-sys-primary);
+    color: var(--mat-sys-on-primary);
+    border-bottom-right-radius: 2px;
+}
+
+.assistant-bubble {
+    background: var(--mat-sys-surface-container);
+    color: var(--mat-sys-on-surface);
+    border-bottom-left-radius: 2px;
+}
+
+.error-bubble {
+    background: var(--copilot-error-tint);
+    border: 1px solid var(--copilot-error-border);
+    color: var(--mat-sys-error);
+}
+
+.message-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.6;
+}
+
+.created-processors {
+    max-width: 95%;
+}
+
+.token-usage {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.token-usage-label,
+.token-usage-sep {
+    font-size: 0.65rem;
+    color: var(--mat-sys-on-surface-variant);
+    opacity: 0.7;
+}
+
+.token-usage-total {
+    font-size: 0.65rem;
+    color: var(--mat-sys-on-surface-variant);
+    opacity: 0.85;
+    font-weight: 500;
+}
+
+.processor-chip {
+    background: var(--copilot-primary-tint);
+    border: 1px solid var(--copilot-primary-border);
+    color: var(--mat-sys-on-surface);
+}
+
+// ── Input area ───────────────────────────────────────────────────────────────
+.copilot-input-area {
+    background: var(--mat-sys-surface-container);
+    border-top: 1px solid var(--mat-sys-outline-variant);
+}
+
+.copilot-select {
+    background: var(--mat-sys-surface);
+    color: var(--mat-sys-on-surface);
+    border: 1px solid var(--mat-sys-outline-variant);
+    outline: none;
+    font-family: inherit;
+    cursor: pointer;
+
+    option {
+        background: var(--mat-sys-surface);
+        color: var(--mat-sys-on-surface);
+    }
+
+    &:focus {
+        border-color: var(--mat-sys-primary);
+    }
+}
+
+.copilot-textarea {
+    background: var(--mat-sys-surface);
+    color: var(--mat-sys-on-surface);
+    border: 1px solid var(--mat-sys-outline-variant);
+    outline: none;
+    font-family: inherit;
+    line-height: 1.5;
+
+    &::placeholder {
+        color: var(--mat-sys-on-surface-variant);
+    }
+
+    &:focus {
+        border-color: var(--mat-sys-primary);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+    }
+}
+
+.send-btn {
+    color: var(--mat-sys-primary);
+
+    &:disabled {
+        opacity: 0.4;
+    }
+}
+
