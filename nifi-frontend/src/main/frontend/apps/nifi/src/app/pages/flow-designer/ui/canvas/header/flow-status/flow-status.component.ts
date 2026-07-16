@@ -29,7 +29,7 @@ import { FlowAnalysisState } from '../../../../state/flow-analysis';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { NiFiState } from '../../../../../../state';
-import { setFlowAnalysisOpen } from '../../../../state/flow/flow.actions';
+import { setFlowAnalysisOpen, setCopilotChatOpen } from '../../../../state/flow/flow.actions';
 
 @Component({
     selector: 'flow-status',
@@ -51,6 +51,7 @@ export class FlowStatus {
     @Input() currentProcessGroupId: string = initialState.id;
     @Input() loadingStatus = false;
     @Input() flowAnalysisOpen = initialState.flowAnalysisOpen;
+    @Input() copilotChatOpen = initialState.copilotChatOpen;
     @Input() set flowAnalysisState(state: FlowAnalysisState) {
         if (!state.ruleViolations.length) {
             this.flowAnalysisNotificationClass = 'primary-color';
@@ -187,6 +188,9 @@ export class FlowStatus {
     toggleFlowAnalysis(): void {
         const flowAnalysisOpen = !this.flowAnalysisOpen;
         this.store.dispatch(setFlowAnalysisOpen({ flowAnalysisOpen }));
+        if (flowAnalysisOpen) {
+            this.store.dispatch(setCopilotChatOpen({ copilotChatOpen: false }));
+        }
 
         // update the current value in storage
         let item: { [key: string]: boolean } | null = this.storage.getItem(FlowStatus.FLOW_ANALYSIS_VISIBILITY_KEY);
@@ -196,5 +200,13 @@ export class FlowStatus {
 
         item[FlowStatus.FLOW_ANALYSIS_KEY] = flowAnalysisOpen;
         this.storage.setItem(FlowStatus.FLOW_ANALYSIS_VISIBILITY_KEY, item);
+    }
+
+    toggleCopilotChat(): void {
+        const copilotChatOpen = !this.copilotChatOpen;
+        this.store.dispatch(setCopilotChatOpen({ copilotChatOpen }));
+        if (copilotChatOpen) {
+            this.store.dispatch(setFlowAnalysisOpen({ flowAnalysisOpen: false }));
+        }
     }
 }

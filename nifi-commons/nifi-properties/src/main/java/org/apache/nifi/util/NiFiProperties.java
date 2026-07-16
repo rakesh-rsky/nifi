@@ -234,6 +234,9 @@ public class NiFiProperties extends ApplicationProperties {
     public static final String WEB_REQUEST_LOG_FORMAT = "nifi.web.request.log.format";
     public static final String WEB_JMX_METRICS_ALLOWED_FILTER_PATTERN = "nifi.web.jmx.metrics.allowed.filter.pattern";
 
+    // copilot properties
+    public static final String COPILOT_URL = "nifi.copilot.url";
+
     // ui properties
     public static final String UI_BANNER_TEXT = "nifi.ui.banner.text";
 
@@ -1912,6 +1915,10 @@ public class NiFiProperties extends ApplicationProperties {
             throw new IllegalArgumentException(remoteInputHost + " is not a correct value for " + REMOTE_INPUT_HOST + ". It should be a valid hostname without protocol or port.");
         }
         // Other properties to validate...
+    }
+
+    public String getCopilotUrl() {
+        return getProperty(COPILOT_URL);
     }
 
     @Override
