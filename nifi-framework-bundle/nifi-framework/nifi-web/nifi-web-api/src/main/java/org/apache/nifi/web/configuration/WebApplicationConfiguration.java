@@ -21,6 +21,7 @@ import org.apache.nifi.audit.NiFiAuditor;
 import org.apache.nifi.authorization.AuthorizableLookup;
 import org.apache.nifi.authorization.Authorizer;
 import org.apache.nifi.authorization.StandardAuthorizableLookup;
+import org.apache.nifi.copilot.CopilotModule;
 import org.apache.nifi.cluster.coordination.ClusterCoordinator;
 import org.apache.nifi.cluster.coordination.http.replication.RequestReplicator;
 import org.apache.nifi.controller.FlowController;
@@ -70,7 +71,8 @@ import org.springframework.context.annotation.Import;
 @ComponentScan(basePackageClasses = {
         ComponentDAO.class,
         NiFiAuditor.class,
-        ApplicationResource.class
+        ApplicationResource.class,
+        CopilotModule.class
 })
 @Import({
         StandardAuthorizableLookup.class,

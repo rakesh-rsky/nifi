@@ -19,8 +19,12 @@
     <fd-header></fd-header>
     <div class="flex-1">
         <mat-sidenav-container class="h-full">
-            <mat-sidenav mode="side" [opened]="flowAnalysisOpen()" position="end">
-                <flow-analysis-drawer></flow-analysis-drawer>
+            <mat-sidenav mode="side" [opened]="copilotChatOpen() || flowAnalysisOpen()" position="end">
+                @if (copilotChatOpen()) {
+                    <copilot-chat></copilot-chat>
+                } @else {
+                    <flow-analysis-drawer></flow-analysis-drawer>
+                }
             </mat-sidenav>
             <mat-sidenav-content>
                 <graph-controls></graph-controls>

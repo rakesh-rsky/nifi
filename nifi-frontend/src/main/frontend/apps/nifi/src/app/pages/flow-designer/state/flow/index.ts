@@ -533,6 +533,7 @@ export interface FlowState {
     navigationCollapsed: boolean;
     operationCollapsed: boolean;
     flowAnalysisOpen: boolean;
+    copilotChatOpen: boolean;
     versionSaving: boolean;
     changeVersionRequest: FlowUpdateRequestEntity | null;
     pollingProcessor: StartPollingProcessorUntilStoppedRequest | null;
