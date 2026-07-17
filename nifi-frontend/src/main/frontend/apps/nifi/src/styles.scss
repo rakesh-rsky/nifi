@@ -28,6 +28,7 @@
 @use 'app/app.component-theme' as app-component;
 @use 'app/pages/documentation/feature/documentation.component-theme' as documentation;
 @use 'app/pages/flow-designer/ui/canvas/canvas.component-theme' as canvas;
+@use 'app/pages/flow-designer/ui/canvas/copilot-chat/copilot-chat.component-theme' as copilot-chat;
 @use 'app/pages/flow-designer/ui/canvas/footer/footer.component-theme' as footer;
 @use 'app/pages/flow-designer/ui/canvas/graph-controls/navigation-control/navigation-control.component-theme' as
     navigation-control;
@@ -84,6 +85,7 @@ html {
     @include listing-table.generate-theme();
     @include documentation.generate-theme();
     @include canvas.generate-theme();
+    @include copilot-chat.generate-theme();
     @include footer.generate-theme();
     @include extension-creation.generate-theme();
     @include birdseye-control.generate-theme();
@@ -118,6 +120,7 @@ html {
         @include listing-table.generate-theme();
         @include documentation.generate-theme();
         @include canvas.generate-theme();
+        @include copilot-chat.generate-theme();
         @include footer.generate-theme();
         @include extension-creation.generate-theme();
         @include birdseye-control.generate-theme();
