@@ -509,6 +509,16 @@ public interface NiFiClientOperations {
     }
 
     /**
+     * Retrieves the connection with the given ID.
+     * Maps to {@code GET /connections/{id}}.
+     *
+     * @param connectionId the connection ID; must not be blank
+     * @return the complete connection entity as a map
+     * @throws IllegalArgumentException if connectionId is blank
+     */
+    Map<String, Object> getConnection(String connectionId);
+
+    /**
      * Updates the connection with the given ID, applying the specified update fields.
      * The current entity revision is fetched fresh on every retry attempt to prevent replaying
      * stale revisions. The caller-provided map is copied; {@code id} and {@code revision} keys
@@ -865,6 +875,20 @@ public interface NiFiClientOperations {
     Map<String, Object> setOutputPortRunStatus(String portId, String state);
 
     /**
+     * Updates the input port with the given ID, applying the specified update fields.
+     * The current entity revision is fetched fresh on every retry attempt.
+     * The caller-provided map is copied; {@code id} and {@code revision} keys are ignored
+     * to prevent overriding the component identity or optimistic-lock revision.
+     * Maps to {@code PUT /input-ports/{id}}.
+     *
+     * @param portId  the input port ID; must not be blank
+     * @param updates the fields to update on the component; must not be null or empty
+     * @return the updated input port entity as a map
+     * @throws IllegalArgumentException if portId is blank or updates is null/empty
+     */
+    Map<String, Object> updateInputPort(String portId, Map<String, Object> updates);
+
+    /**
      * Deletes the output port with the given ID.
      * Maps to {@code DELETE /output-ports/{id}}.
      *
@@ -872,6 +896,20 @@ public interface NiFiClientOperations {
      * @throws IllegalArgumentException if portId is blank
      */
     void deleteOutputPort(String portId);
+
+    /**
+     * Updates the output port with the given ID, applying the specified update fields.
+     * The current entity revision is fetched fresh on every retry attempt.
+     * The caller-provided map is copied; {@code id} and {@code revision} keys are ignored
+     * to prevent overriding the component identity or optimistic-lock revision.
+     * Maps to {@code PUT /output-ports/{id}}.
+     *
+     * @param portId  the output port ID; must not be blank
+     * @param updates the fields to update on the component; must not be null or empty
+     * @return the updated output port entity as a map
+     * @throws IllegalArgumentException if portId is blank or updates is null/empty
+     */
+    Map<String, Object> updateOutputPort(String portId, Map<String, Object> updates);
 
     /**
      * Creates a label in the process group with the given ID.

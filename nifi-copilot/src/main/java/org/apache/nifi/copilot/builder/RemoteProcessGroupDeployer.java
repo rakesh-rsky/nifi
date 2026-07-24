@@ -26,8 +26,7 @@ final class RemoteProcessGroupDeployer {
             final List<Map<String, Object>> specs,
             final String processGroupId,
             final Map<String, Object> flow,
-            final CanvasLayoutEngine canvasLayoutEngine,
-            final CollisionAvoider collisionAvoider,
+            final CanvasPositionProvider positionProvider,
             final ComponentRegistry components,
             final OwnershipLedger ledger,
             final ComponentResolver resolver,
@@ -50,11 +49,12 @@ final class RemoteProcessGroupDeployer {
                 final String nifiId;
                 if (match == null) {
                     final double[] position =
-                            canvasLayoutEngine.claimRemoteProcessGroupPosition(rpgSpec, collisionAvoider);
+                            positionProvider.provisionalPosition(rpgSpec);
                     final Map<String, Object> result = nifi.createRemoteProcessGroup(processGroupId, targetUri,
                             position[0], position[1], optionalMapField(rpgSpec, "config"));
                     nifiId = requireEntityId(result, "created remote process group");
-                    ledger.addCanvasAction("delete remote process group " + nifiId,
+                    ledger.addChangedCanvasId(nifiId);
+                    ledger.addCanvasDeletionAction("delete remote process group " + nifiId,
                             () -> nifi.deleteRemoteProcessGroup(nifiId));
                     if (state != null) {
                         ledger.addRemoteTransmissionRequest(nifiId, state);
@@ -65,7 +65,7 @@ final class RemoteProcessGroupDeployer {
                     final String originalState = transmissionState(match);
                     final Map<String, Object> updates = new LinkedHashMap<>(optionalMapField(rpgSpec, "config"));
                     updates.put("targetUri", targetUri);
-                    updates.putAll(canvasLayoutEngine.requestedPosition(rpgSpec, component));
+                    updates.putAll(positionProvider.requestedPosition(rpgSpec, component));
                     final Map<String, Object> originalUpdates = originalUpdatedFields(component, updates);
                     ledger.addRemoteTransmissionRestore(nifiId, originalState);
                     if ("TRANSMITTING".equals(originalState)) {
@@ -74,6 +74,7 @@ final class RemoteProcessGroupDeployer {
                     ledger.addCanvasAction("restore remote process group " + nifiId,
                             () -> nifi.updateRemoteProcessGroup(nifiId, originalUpdates));
                     nifi.updateRemoteProcessGroup(nifiId, updates);
+                    ledger.addChangedCanvasId(nifiId);
                     ledger.addRemoteTransmissionRequest(nifiId, state == null ? originalState : state);
                 }
                 components.register(specId, nifiId, "REMOTE_PROCESS_GROUP");

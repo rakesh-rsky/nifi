@@ -3,6 +3,7 @@ package org.apache.nifi.copilot.builder;
 import static org.apache.nifi.copilot.builder.NiFiEntitySupport.requireCreatedComponentId;
 import static org.apache.nifi.copilot.builder.NiFiEntitySupport.requireEntityId;
 import static org.apache.nifi.copilot.builder.SpecificationSupport.mapOrEmpty;
+import static org.apache.nifi.copilot.builder.SpecificationSupport.toStringList;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,6 +61,11 @@ final class ConnectionDeployer {
                     throw new IllegalStateException("Connection endpoint could not be resolved: from="
                             + connectionSpec.get("from") + ", to=" + connectionSpec.get("to"));
                 }
+                if (source.equals(destination)
+                        && !Boolean.TRUE.equals(connectionSpec.get("allow_self_loop"))) {
+                    throw new IllegalArgumentException("Resolved connection endpoints refer to the same component; "
+                            + "set allow_self_loop=true only for an intentional feedback loop");
+                }
                 final String sourceType = resolver.resolveEndpointType(
                         sourceReference, connectionSpec.get("from_type"), components);
                 final String destinationType = resolver.resolveEndpointType(
@@ -80,28 +86,46 @@ final class ConnectionDeployer {
                     if (previousRelationships == null) {
                         connAction = FlowDeploymentMetricsRegistry.ComponentAction.UPDATED;
                         updateExistingConnection(existing, relationships, ledger, nifi);
+                        ledger.addChangedCanvasId(existingId);
+                        ledger.addChangedCanvasId(source);
+                        ledger.addChangedCanvasId(destination);
                     } else {
                         connAction = FlowDeploymentMetricsRegistry.ComponentAction.REUSED;
                     }
                 } else {
-                    connAction = FlowDeploymentMetricsRegistry.ComponentAction.CREATED;
-                    final Map<String, Object> result = nifi.createConnection(
-                            processGroupId,
-                            source,
-                            sourceType,
-                            destination,
-                            destinationType,
-                            relationships);
-                    final String connectionId = requireCreatedComponentId(result, "connection");
-                    ledger.addCreatedConnectionId(connectionId);
-                    requestedRelationshipsByConnectionId.put(connectionId, relationships);
-                    final Map<String, Object> createdComponent = new LinkedHashMap<>();
-                    createdComponent.put("id", connectionId);
-                    createdComponent.put("source", Map.of("id", source, "type", sourceType));
-                    createdComponent.put("destination", Map.of("id", destination, "type", destinationType));
-                    createdComponent.put("selectedRelationships", relationships);
-                    existingConnections.add(Map.of("id", connectionId, "component", createdComponent));
-                    connectionsCreated++;
+                    final Map<String, Object> reassigned = releaseRelationships(
+                            existingConnections, source, sourceType, destination, destinationType,
+                            relationships, ledger, nifi);
+                    if (reassigned != null) {
+                        connAction = FlowDeploymentMetricsRegistry.ComponentAction.UPDATED;
+                        final String connectionId = requireEntityId(reassigned, "connection");
+                        requestedRelationshipsByConnectionId.put(connectionId, relationships);
+                        ledger.addChangedCanvasId(connectionId);
+                        ledger.addChangedCanvasId(source);
+                        ledger.addChangedCanvasId(destination);
+                    } else {
+                        connAction = FlowDeploymentMetricsRegistry.ComponentAction.CREATED;
+                        final Map<String, Object> result = nifi.createConnection(
+                                processGroupId,
+                                source,
+                                sourceType,
+                                destination,
+                                destinationType,
+                                relationships);
+                        final String connectionId = requireCreatedComponentId(result, "connection");
+                        ledger.addCreatedConnectionId(connectionId);
+                        ledger.addChangedCanvasId(connectionId);
+                        ledger.addChangedCanvasId(source);
+                        ledger.addChangedCanvasId(destination);
+                        requestedRelationshipsByConnectionId.put(connectionId, relationships);
+                        final Map<String, Object> createdComponent = new LinkedHashMap<>();
+                        createdComponent.put("id", connectionId);
+                        createdComponent.put("source", Map.of("id", source, "type", sourceType));
+                        createdComponent.put("destination", Map.of("id", destination, "type", destinationType));
+                        createdComponent.put("selectedRelationships", relationships);
+                        existingConnections.add(Map.of("id", connectionId, "component", createdComponent));
+                        connectionsCreated++;
+                    }
                 }
                 metrics.observeComponent(FlowDeploymentMetricsRegistry.Resource.CONNECTION,
                         connAction, FlowDeploymentMetricsRegistry.ActionOutcome.SUCCESS);
@@ -118,6 +142,70 @@ final class ConnectionDeployer {
             throwAggregated("Connection deployment", failures);
         }
         return connectionsCreated;
+    }
+
+    private static Map<String, Object> releaseRelationships(
+            final List<Map<String, Object>> existingConnections,
+            final String source,
+            final String sourceType,
+            final String destination,
+            final String destinationType,
+            final List<String> requestedRelationships,
+            final OwnershipLedger ledger,
+            final NiFiClientOperations nifi) {
+        for (int index = 0; index < existingConnections.size(); index++) {
+            final Map<String, Object> entity = existingConnections.get(index);
+            final Map<String, Object> component = new LinkedHashMap<>(mapOrEmpty(entity.get("component")));
+            final Map<String, Object> existingSource = mapOrEmpty(component.get("source"));
+            final Map<String, Object> existingDestination = mapOrEmpty(component.get("destination"));
+            if (!source.equals(String.valueOf(existingSource.get("id")))
+                    || !sourceType.equalsIgnoreCase(String.valueOf(existingSource.get("type")))
+                    || destination.equals(String.valueOf(existingDestination.get("id")))) {
+                continue;
+            }
+            final List<String> currentRelationships = toStringList(component.get("selectedRelationships"));
+            final List<String> overlapping = currentRelationships.stream()
+                    .filter(requestedRelationships::contains)
+                    .toList();
+            if (overlapping.isEmpty()) {
+                continue;
+            }
+
+            final String connectionId = requireEntityId(entity, "connection");
+            ledger.addConnectionRestore(connectionId, new LinkedHashMap<>(component));
+            ledger.addChangedCanvasId(connectionId);
+            ledger.addChangedCanvasId(String.valueOf(existingDestination.get("id")));
+            final List<String> remaining = currentRelationships.stream()
+                    .filter(relationship -> !requestedRelationships.contains(relationship))
+                    .toList();
+            final Map<String, Object> updates = new LinkedHashMap<>();
+            if (remaining.isEmpty()) {
+                final Map<String, Object> newDestination =
+                        Map.of("id", destination, "type", destinationType);
+                updates.put("destination", newDestination);
+                updates.put("selectedRelationships", requestedRelationships);
+                nifi.updateConnection(connectionId, updates);
+                component.put("destination", newDestination);
+                component.put("selectedRelationships", requestedRelationships);
+                final Map<String, Object> updatedEntity = updatedEntity(entity, component);
+                existingConnections.set(index, updatedEntity);
+                return updatedEntity;
+            }
+
+            updates.put("selectedRelationships", remaining);
+            nifi.updateConnection(connectionId, updates);
+            component.put("selectedRelationships", remaining);
+            existingConnections.set(index, updatedEntity(entity, component));
+        }
+        return null;
+    }
+
+    private static Map<String, Object> updatedEntity(
+            final Map<String, Object> entity,
+            final Map<String, Object> component) {
+        final Map<String, Object> updated = new LinkedHashMap<>(entity);
+        updated.put("component", component);
+        return updated;
     }
 
     private static void updateExistingConnection(

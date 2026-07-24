@@ -1288,6 +1288,14 @@ public class InternalNiFiClient implements NiFiClientOperations {
     }
 
     @Override
+    public Map<String, Object> getConnection(final String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            throw new IllegalArgumentException("connectionId must not be blank");
+        }
+        return objectMapper.convertValue(serviceFacade.getConnection(connectionId), new TypeReference<>() {});
+    }
+
+    @Override
     public Map<String, Object> updateConnection(final String connectionId, final Map<String, Object> updates) {
         if (connectionId == null || connectionId.isBlank()) {
             throw new IllegalArgumentException("connectionId must not be blank");
@@ -1608,6 +1616,31 @@ public class InternalNiFiClient implements NiFiClientOperations {
     }
 
     @Override
+    public Map<String, Object> updateInputPort(final String portId, final Map<String, Object> updates) {
+        if (portId == null || portId.isBlank()) {
+            throw new IllegalArgumentException("portId must not be blank");
+        }
+        if (updates == null || updates.isEmpty()) {
+            throw new IllegalArgumentException("updates must not be null or empty");
+        }
+        final AtomicReference<Map<String, Object>> result = new AtomicReference<>();
+        executeWithRevisionRetry("update input port " + portId, () -> {
+            final PortEntity entity = serviceFacade.getInputPort(portId);
+            final long ver = strictVersion(entity);
+            final Map<String, Object> componentMap = new HashMap<>(updates);
+            componentMap.remove("id");
+            componentMap.remove("revision");
+            componentMap.put("id", portId);
+            final PortDTO dto = objectMapper.convertValue(componentMap, PortDTO.class);
+            dto.setId(portId);
+            serviceFacade.verifyUpdateInputPort(dto);
+            final PortEntity updated = serviceFacade.updateInputPort(revision(ver, portId), dto);
+            result.set(objectMapper.convertValue(updated, new TypeReference<>() {}));
+        });
+        return result.get();
+    }
+
+    @Override
     public void deleteInputPort(final String portId) {
         if (portId == null || portId.isBlank()) {
             throw new IllegalArgumentException("portId must not be blank");
@@ -1657,6 +1690,31 @@ public class InternalNiFiClient implements NiFiClientOperations {
             final PortDTO dto = new PortDTO();
             dto.setId(portId);
             dto.setState(normalized);
+            serviceFacade.verifyUpdateOutputPort(dto);
+            final PortEntity updated = serviceFacade.updateOutputPort(revision(ver, portId), dto);
+            result.set(objectMapper.convertValue(updated, new TypeReference<>() {}));
+        });
+        return result.get();
+    }
+
+    @Override
+    public Map<String, Object> updateOutputPort(final String portId, final Map<String, Object> updates) {
+        if (portId == null || portId.isBlank()) {
+            throw new IllegalArgumentException("portId must not be blank");
+        }
+        if (updates == null || updates.isEmpty()) {
+            throw new IllegalArgumentException("updates must not be null or empty");
+        }
+        final AtomicReference<Map<String, Object>> result = new AtomicReference<>();
+        executeWithRevisionRetry("update output port " + portId, () -> {
+            final PortEntity entity = serviceFacade.getOutputPort(portId);
+            final long ver = strictVersion(entity);
+            final Map<String, Object> componentMap = new HashMap<>(updates);
+            componentMap.remove("id");
+            componentMap.remove("revision");
+            componentMap.put("id", portId);
+            final PortDTO dto = objectMapper.convertValue(componentMap, PortDTO.class);
+            dto.setId(portId);
             serviceFacade.verifyUpdateOutputPort(dto);
             final PortEntity updated = serviceFacade.updateOutputPort(revision(ver, portId), dto);
             result.set(objectMapper.convertValue(updated, new TypeReference<>() {}));

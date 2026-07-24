@@ -189,6 +189,7 @@ language governing permissions and limitations under the License. -->
             <groupId>org.apache.nifi</groupId>
             <artifactId>nifi-copilot</artifactId>
             <version>2.10.0-SNAPSHOT</version>
+            <classifier>exec</classifier>
             <scope>runtime</scope>
         </dependency>
         <dependency>

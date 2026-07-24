@@ -1,6 +1,7 @@
 package org.apache.nifi.copilot.builder;
 
 import static org.apache.nifi.copilot.builder.LocalPreflightValidator.validateComponentSpecIds;
+import static org.apache.nifi.copilot.builder.LocalPreflightValidator.validateConnectionTopology;
 import static org.apache.nifi.copilot.builder.LocalPreflightValidator.validateParameterContext;
 import static org.apache.nifi.copilot.builder.LocalPreflightValidator.validateSnippetOperations;
 import static org.apache.nifi.copilot.builder.LocalPreflightValidator.validateSpecificationCollections;
@@ -15,25 +16,42 @@ import org.apache.nifi.copilot.service.NiFiClientOperations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class FlowBuilder {
     private static final Logger logger = LoggerFactory.getLogger(FlowBuilder.class);
     private static final CanvasProjector CANVAS_PROJECTOR = new CanvasProjector();
-    private static final FlowDeploymentCoordinator COORDINATOR = new FlowDeploymentCoordinator();
-
     private final FlowDeploymentMetricsRegistry metrics;
+    private final FlowDeploymentCoordinator coordinator;
 
-    /** Direct construction uses an isolated metrics registry. */
+    /** Direct construction uses an isolated metrics registry and engine layout mode. */
     public FlowBuilder() {
         this.metrics = new FlowDeploymentMetricsRegistry();
+        this.coordinator = new FlowDeploymentCoordinator(LayoutMode.ENGINE);
     }
 
-    /** Spring-managed construction: shared metrics registry is injected. */
-    @Autowired
-    public FlowBuilder(final FlowDeploymentMetricsRegistry metrics) {
+    /** Package-private constructor for testing with injected coordinator. */
+    FlowBuilder(final FlowDeploymentMetricsRegistry metrics,
+                final FlowDeploymentCoordinator coordinator) {
         this.metrics = metrics;
+        this.coordinator = coordinator;
+    }
+
+    /**
+     * Spring-managed construction: shared metrics registry is injected. The layout mode is
+     * read from {@code nifi.copilot.layout.mode} (env: {@code NIFI_COPILOT_LAYOUT_MODE}),
+     * defaulting to {@code engine}. Invalid values are rejected at startup.
+     */
+    @Autowired
+    public FlowBuilder(
+            final FlowDeploymentMetricsRegistry metrics,
+            @Value("${nifi.copilot.layout.mode:engine}") final String layoutModeStr) {
+        this.metrics = metrics;
+        final LayoutMode layoutMode = LayoutMode.fromString(layoutModeStr);
+        logger.info("NiFi Copilot canvas layout mode: {}", layoutMode);
+        this.coordinator = new FlowDeploymentCoordinator(layoutMode);
     }
 
     public record BuildResult(List<Map<String, Object>> createdProcessors, int connectionsCreated) {
@@ -59,14 +77,15 @@ public class FlowBuilder {
                 return new BuildResult(List.of(), 0);
             }
             validateComponentSpecIds(deploymentSpec);
+            validateConnectionTopology(listOfMap(deploymentSpec.get("connections")));
             validateSnippetOperations(listOfMap(deploymentSpec.get("snippets")), context.rollbackOnFailure());
             final Map<String, Object> parameterContextSpec = mapOrNull(deploymentSpec.get("parameter_context"));
             if (parameterContextSpec != null) {
                 validateParameterContext(parameterContextSpec);
             }
-            final DeploymentState state = COORDINATOR.prepare(context, metrics);
+            final DeploymentState state = coordinator.prepare(context, metrics);
             try {
-                final DeploymentReport report = COORDINATOR.deploy(state);
+                final DeploymentReport report = coordinator.deploy(state);
                 deploymentSucceeded = true;
                 return new BuildResult(report.createdProcessors(), report.connectionsCreated());
             } catch (Exception e) {

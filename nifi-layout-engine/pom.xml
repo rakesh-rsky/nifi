@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+      http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>in.shrake.nifi</groupId>
+    <artifactId>nifi-layout-engine</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <description>NiFi Layout Engine - standalone Sugiyama-based canvas layout for Apache NiFi flows</description>
+
+    <properties>
+        <junit.version>5.10.2</junit.version>
+        <jqwik.version>1.8.2</jqwik.version>
+        <mockito.version>5.20.0</mockito.version>
+        <nifi.version>2.10.0-SNAPSHOT</nifi.version>
+        <spring.boot.version>3.5.3</spring.boot.version>
+        <java.version>21</java.version>
+    </properties>
+
+    <!--
+      NiFi adapter dependencies are declared inside profiles so that targeted
+      builds (-Dlayout.core, -Dlayout.copilot) pull in ONLY the NiFi JARs
+      their source roots actually need.  The all-adapters profile (active by
+      default) declares the REST DTO dependency; the canonical mvn install
+      therefore makes it available on the compile classpath.
+      flatten-maven-plugin (flattenMode=oss) resolves the effective POM with
+      the active all-adapters profile merged in, so the flat installed POM
+      exposes the full NiFi dependency contract to consumers without requiring
+      any profile activation.
+    -->
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring.boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>6.2.8</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-core</artifactId>
+                <version>6.2.8</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-jcl</artifactId>
+                <version>6.2.8</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
+            <version>${jqwik.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.14.0</version>
+                <configuration>
+                    <release>${java.version}</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <jqwik.database>${project.build.directory}/jqwik-database</jqwik.database>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>adapter-rest</id>
+            <activation><property><name>layout.rest</name></property></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.nifi</groupId>
+                    <artifactId>nifi-client-dto</artifactId>
+                    <version>${nifi.version}</version>
+                    <scope>compile</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>in/shrake/nifi/layout/copilot/</exclude>
+                            </excludes>
+                            <testExcludes>
+                                <testExclude>in/shrake/nifi/layout/copilot/</testExclude>
+                            </testExcludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Copilot adapter: activated with -Dlayout.copilot -->
+        <profile>
+            <id>adapter-copilot</id>
+            <activation><property><name>layout.copilot</name></property></activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>in/shrake/nifi/layout/rest/</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+          Core + support only: activated with -Dlayout.core.
+          Adds no sources or dependencies beyond the default; its sole purpose
+          is to deactivate the activeByDefault canonical all-adapters profile so
+          that a developer can build and test just the core/support sources.
+          No NiFi deps are pulled in because neither core nor support source
+          trees import any org.apache.nifi types.
+        -->
+        <profile>
+            <id>core-only</id>
+            <activation><property><name>layout.core</name></property></activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>in/shrake/nifi/layout/rest/</exclude>
+                                <exclude>in/shrake/nifi/layout/copilot/</exclude>
+                            </excludes>
+                            <testExcludes>
+                                <testExclude>in/shrake/nifi/layout/copilot/</testExclude>
+                            </testExcludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+          Canonical all-adapter build: active by default so that plain
+          `mvn clean install` produces and installs the full canonical JAR.
+          Any explicit property activation (-Dlayout.rest, -Dlayout.copilot,
+          -Dlayout.core) deactivates this profile so that
+          targeted builds include only the requested adapter source roots.
+          The REST DTO dependency is declared here so that a plain install
+          exposes it to consumers.
+          Use -Pall-adapters to force-activate alongside targeted builds.
+        -->
+        <profile>
+            <id>all-adapters</id>
+            <activation><activeByDefault>true</activeByDefault></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.nifi</groupId>
+                    <artifactId>nifi-client-dto</artifactId>
+                    <version>${nifi.version}</version>
+                    <scope>compile</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.1</version>
+                        <executions>
+                            <execution>
+                                <id>add-all-adapter-sources</id>
+                                <phase>generate-sources</phase>
+                                <goals><goal>add-source</goal></goals>
+                                <configuration>
+                                    <sources>
+                                        <source>in/shrake/nifi/layout/rest/</source>
+                                        <source>in/shrake/nifi/layout/copilot/</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

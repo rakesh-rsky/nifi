@@ -2,8 +2,10 @@ package org.apache.nifi.copilot.builder;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per-build record of owned resources and restore actions needed for compensating rollback.
@@ -42,6 +44,8 @@ final class OwnershipLedger {
     private final List<ConnectionRestore> updatedConnections = new ArrayList<>();
     private final List<RollbackAction> snippetActions = new ArrayList<>();
     private final List<RollbackAction> canvasActions = new ArrayList<>();
+    private final List<RollbackAction> canvasDeletionActions = new ArrayList<>();
+    private final Set<String> changedCanvasIds = new LinkedHashSet<>();
     private final List<RuntimeRequest> runtimeRequests = new ArrayList<>();
     private final List<RuntimeRestore> runtimeRestores = new ArrayList<>();
     private final List<TransmissionRequest> remoteTransmissionRequests = new ArrayList<>();
@@ -89,6 +93,20 @@ final class OwnershipLedger {
 
     void addCanvasAction(final String description, final Runnable action) {
         canvasActions.add(new RollbackAction(description, action));
+    }
+
+    void addCanvasDeletionAction(final String description, final Runnable action) {
+        canvasDeletionActions.add(new RollbackAction(description, action));
+    }
+
+    void addChangedCanvasId(final String id) {
+        if (id != null && !id.isBlank()) {
+            changedCanvasIds.add(id);
+        }
+    }
+
+    Set<String> changedCanvasIds() {
+        return Collections.unmodifiableSet(changedCanvasIds);
     }
 
     void addRuntimeRequest(final boolean input, final String id, final String state) {
@@ -153,6 +171,10 @@ final class OwnershipLedger {
 
     List<RollbackAction> canvasActions() {
         return Collections.unmodifiableList(canvasActions);
+    }
+
+    List<RollbackAction> canvasDeletionActions() {
+        return Collections.unmodifiableList(canvasDeletionActions);
     }
 
     List<RuntimeRestore> runtimeRestores() {

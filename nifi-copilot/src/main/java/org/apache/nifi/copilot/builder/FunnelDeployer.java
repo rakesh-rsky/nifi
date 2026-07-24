@@ -20,8 +20,7 @@ final class FunnelDeployer {
             final List<Map<String, Object>> specs,
             final String processGroupId,
             final Map<String, Object> flow,
-            final CanvasLayoutEngine canvasLayoutEngine,
-            final CollisionAvoider collisionAvoider,
+            final CanvasPositionProvider positionProvider,
             final ComponentRegistry components,
             final OwnershipLedger ledger,
             final ComponentResolver resolver,
@@ -39,21 +38,22 @@ final class FunnelDeployer {
                         : FlowDeploymentMetricsRegistry.ComponentAction.REUSED;
                 final String nifiId;
                 if (match == null) {
-                    final double[] position =
-                            canvasLayoutEngine.claimFunnelPosition(funnelSpec, collisionAvoider);
+                    final double[] position = positionProvider.provisionalPosition(funnelSpec);
                     final Map<String, Object> result = nifi.createFunnel(processGroupId, position[0], position[1]);
                     nifiId = requireEntityId(result, "created funnel");
-                    ledger.addCanvasAction("delete funnel " + nifiId, () -> nifi.deleteFunnel(nifiId));
+                    ledger.addChangedCanvasId(nifiId);
+                    ledger.addCanvasDeletionAction("delete funnel " + nifiId, () -> nifi.deleteFunnel(nifiId));
                 } else {
                     nifiId = requireEntityId(match, "funnel");
                     final Map<String, Object> component = new LinkedHashMap<>(mapOrEmpty(match.get("component")));
                     final Map<String, Object> updates =
-                            canvasLayoutEngine.requestedPosition(funnelSpec, component);
+                            positionProvider.requestedPosition(funnelSpec, component);
                     if (!updates.isEmpty()) {
                         funnelAction = FlowDeploymentMetricsRegistry.ComponentAction.UPDATED;
                         ledger.addCanvasAction("restore funnel " + nifiId,
                                 () -> nifi.updateFunnel(nifiId, restoreFields(component, "position")));
                         nifi.updateFunnel(nifiId, updates);
+                        ledger.addChangedCanvasId(nifiId);
                     }
                 }
                 components.register(specId, nifiId, "FUNNEL");

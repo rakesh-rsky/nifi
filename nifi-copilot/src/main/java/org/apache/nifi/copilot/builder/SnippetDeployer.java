@@ -40,7 +40,7 @@ final class SnippetDeployer {
             final ComponentRegistry components,
             final OwnershipLedger ledger,
             final ComponentResolver resolver,
-            final CanvasLayoutEngine layoutEngine,
+            final CanvasPositionProvider positionProvider,
             final NiFiClientOperations nifi,
             final FlowDeploymentMetricsRegistry metrics) {
         final List<Exception> failures = new ArrayList<>();
@@ -73,8 +73,8 @@ final class SnippetDeployer {
                     final String destination = resolver.resolveProcessGroupReference(
                             operation.get("destination_process_group_id"), components);
                     nifi.copySnippet(snippetId, destination,
-                            layoutEngine.xOrDefault(operation.get("x")),
-                            layoutEngine.yOrDefault(operation.get("y")));
+                            positionProvider.xOrDefault(operation.get("x")),
+                            positionProvider.yOrDefault(operation.get("y")));
                     metrics.observeComponent(FlowDeploymentMetricsRegistry.Resource.SNIPPET,
                             FlowDeploymentMetricsRegistry.ComponentAction.CREATED,
                             FlowDeploymentMetricsRegistry.ActionOutcome.SUCCESS);

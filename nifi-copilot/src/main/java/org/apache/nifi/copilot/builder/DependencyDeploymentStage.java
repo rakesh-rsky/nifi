@@ -29,7 +29,8 @@ final class DependencyDeploymentStage {
 
         final List<Map<String, Object>> csSpecs = listOfMap(spec.get("controller_services"));
         if (!csSpecs.isEmpty()) {
-            state.csDeployer().deployAll(csSpecs, pgId, state.ledger(), resolver, context.nifi(), metrics);
+            state.csDeployer().deployAll(
+                    state.controllerServicePlan(), pgId, state.ledger(), context.nifi(), metrics);
         }
     }
 }

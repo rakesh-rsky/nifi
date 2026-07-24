@@ -15,18 +15,21 @@ import org.slf4j.LoggerFactory;
  * Executes compensating rollback for a failed deployment in the exact order required:
  *  1. stop requested ports (forward)
  *  2. stop requested RPG transmission (forward)
- *  3. delete created connections (reverse)
- *  4. reverse snippet actions (reverse)
- *  5. reverse canvas mutations (reverse)
- *  6. restore port states (reverse)
- *  7. restore RPG transmission states (reverse)
- *  8. delete created processors (reverse)
- *  9. restore updated processors (reverse)
- * 10. restore updated connections (reverse)
- * 11. delete created controller services (reverse)
- * 12. restore or remove parameter-context binding; delete only owned context
+ *  3. reverse canvas mutations (reverse) — runs before deletion so layout
+ *     positions/bends are restored while all resources still exist
+ *  4. delete created connections (reverse)
+ *  5. reverse snippet actions (reverse)
+ *  6. delete created canvas resources (reverse)
+ *  7. restore port states (reverse)
+ *  8. restore RPG transmission states (reverse)
+ *  9. delete created processors (reverse)
+ * 10. restore updated processors (reverse)
+ * 11. restore updated connections (reverse)
+ * 12. delete created controller services (reverse)
  * 13. delete only the owned child process group
- * 14. attach aggregate failures as suppressed on the original deployment exception
+ * 14. for reused targets, restore or remove the parameter-context binding;
+ *     delete only the deployment-owned context
+ * 15. attach aggregate failures as suppressed on the original deployment exception
  */
 final class RollbackManager {
 
@@ -58,6 +61,13 @@ final class RollbackManager {
                     failures, metrics,
                     () -> nifi.setRemoteProcessGroupTransmission(request.id(), "STOPPED"));
         }
+        final List<OwnershipLedger.RollbackAction> canvasActions = ledger.canvasActions();
+        for (int i = canvasActions.size() - 1; i >= 0; i--) {
+            final var action = canvasActions.get(i);
+            runStep(action.description(),
+                    FlowDeploymentMetricsRegistry.RollbackActionCategory.REVERSE_CANVAS,
+                    failures, metrics, action.action());
+        }
         final List<String> connectionIds = ledger.createdConnectionIds();
         for (int i = connectionIds.size() - 1; i >= 0; i--) {
             final String connectionId = connectionIds.get(i);
@@ -73,9 +83,9 @@ final class RollbackManager {
                     FlowDeploymentMetricsRegistry.RollbackActionCategory.REVERSE_SNIPPET,
                     failures, metrics, action.action());
         }
-        final List<OwnershipLedger.RollbackAction> canvasActions = ledger.canvasActions();
-        for (int i = canvasActions.size() - 1; i >= 0; i--) {
-            final var action = canvasActions.get(i);
+        final List<OwnershipLedger.RollbackAction> canvasDeletionActions = ledger.canvasDeletionActions();
+        for (int i = canvasDeletionActions.size() - 1; i >= 0; i--) {
+            final var action = canvasDeletionActions.get(i);
             runStep(action.description(),
                     FlowDeploymentMetricsRegistry.RollbackActionCategory.REVERSE_CANVAS,
                     failures, metrics, action.action());
@@ -128,6 +138,11 @@ final class RollbackManager {
                         final Map<String, Object> restoreUpdates = new LinkedHashMap<>();
                         restoreUpdates.put("selectedRelationships",
                                 originalRelationships == null ? List.of() : originalRelationships);
+                        final Object originalDestination =
+                                mapOrEmpty(restore.originalComponent()).get("destination");
+                        if (originalDestination != null) {
+                            restoreUpdates.put("destination", originalDestination);
+                        }
                         nifi.updateConnection(restore.connectionId(), restoreUpdates);
                     });
         }
@@ -140,18 +155,21 @@ final class RollbackManager {
                     () -> nifi.deleteControllerService(serviceId));
         }
 
+        final String childPgId = ledger.childProcessGroupId();
+        if (childPgId != null) {
+            runStep("delete child process group " + childPgId,
+                    FlowDeploymentMetricsRegistry.RollbackActionCategory.DELETE_CHILD_PROCESS_GROUP,
+                    failures, metrics,
+                    () -> nifi.deleteProcessGroup(childPgId));
+        }
+
         final OwnershipLedger.ParameterContextOwnership pc = ledger.parameterContextOwnership();
         if (pc != null && pc.pcId() != null) {
             final String boundProcessGroupId = pc.boundProcessGroupId();
             final boolean ownedChild = boundProcessGroupId != null
                     && boundProcessGroupId.equals(ledger.childProcessGroupId());
-            if (boundProcessGroupId != null) {
-                if (ownedChild) {
-                    runStep("unbind parameter context from owned child process group " + boundProcessGroupId,
-                            FlowDeploymentMetricsRegistry.RollbackActionCategory.RESTORE_PARAMETER_CONTEXT,
-                            failures, metrics,
-                            () -> nifi.unbindParameterContextFromProcessGroup(boundProcessGroupId));
-                } else if (pc.previousBindingId() == null) {
+            if (boundProcessGroupId != null && !ownedChild) {
+                if (pc.previousBindingId() == null) {
                     runStep("restore empty parameter context binding on " + boundProcessGroupId,
                             FlowDeploymentMetricsRegistry.RollbackActionCategory.RESTORE_PARAMETER_CONTEXT,
                             failures, metrics,
@@ -172,14 +190,6 @@ final class RollbackManager {
                         () -> nifi.deleteParameterContext(pcId));
             }
         }
-        final String childPgId = ledger.childProcessGroupId();
-        if (childPgId != null) {
-            runStep("delete child process group " + childPgId,
-                    FlowDeploymentMetricsRegistry.RollbackActionCategory.DELETE_CHILD_PROCESS_GROUP,
-                    failures, metrics,
-                    () -> nifi.deleteProcessGroup(childPgId));
-        }
-
         if (failures.isEmpty()) {
             logger.info("Rollback completed for process group {}", ledger.targetProcessGroupId());
             metrics.observeRollback(FlowDeploymentMetricsRegistry.RollbackOutcome.SUCCESS);

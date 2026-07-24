@@ -28,3 +28,6 @@ nifi-copilot/data/
 
 # Develocity
 .mvn/.develocity/
+
+# jqwik property-test state (generated, do not track)
+.jqwik-database*

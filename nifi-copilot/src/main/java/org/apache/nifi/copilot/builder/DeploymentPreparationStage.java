@@ -19,8 +19,7 @@ import org.apache.nifi.copilot.service.NiFiClientOperations;
  *
  * <p>{@link #prepareTarget} is the first operation <em>inside</em> the try/catch —
  * it resolves or creates the effective child process group, captures the child
- * snapshot when rollback is requested, validates the target, and prepares the
- * canvas layout.
+ * snapshot when rollback is requested, and validates the target.
  */
 final class DeploymentPreparationStage {
 
@@ -46,14 +45,13 @@ final class DeploymentPreparationStage {
 
     /**
      * Resolves or creates the effective process group, optionally captures its
-     * snapshot, validates the target, and prepares canvas layout. Must be called
-     * inside the deployment try/catch.
+     * snapshot, and validates the target. Must be called inside the deployment
+     * try/catch.
      */
     static void prepareTarget(
             final DeploymentState state,
             final ComponentResolver resolver,
-            final LivePreflightValidator liveValidator,
-            final CanvasLayoutEngine layoutEngine) {
+            final LivePreflightValidator liveValidator) {
         final DeploymentContext context = state.context();
         final Map<String, Object> processGroupSpec =
                 mapOrNull(context.specification().get("process_group"));
@@ -61,10 +59,21 @@ final class DeploymentPreparationStage {
                 processGroupSpec, state.prePgId(), state.parentSnapshot(),
                 context.rollbackOnFailure(), state.ledger(), resolver, context.nifi());
         liveValidator.validatePreparedTarget(target);
-        final CollisionAvoider collisionAvoider =
-                layoutEngine.prepare(context, target.inventoryResponse());
         state.setTarget(target);
-        state.setCollisionAvoider(collisionAvoider);
+    }
+
+    static String findExistingEffectiveProcessGroupId(
+            final DeploymentState state,
+            final ComponentResolver resolver) {
+        final Map<String, Object> processGroupSpec =
+                mapOrNull(state.context().specification().get("process_group"));
+        if (processGroupSpec == null) {
+            return state.prePgId();
+        }
+        final String name = requireProcessGroupName(processGroupSpec);
+        final Map<String, Object> existingChild = resolver.findUniqueChildProcessGroup(
+                state.prePgId(), name, state.context().nifi());
+        return existingChild == null ? null : requireEntityId(existingChild, "child process group");
     }
 
     private static DeploymentTarget resolveEffectiveTarget(
@@ -84,11 +93,7 @@ final class DeploymentPreparationStage {
             previousBinding = parentSnapshot == null
                     ? null : stringOrNull(parentSnapshot.get("originalPcBindingId"));
         } else {
-            final Object nameValue = processGroupSpec.get("name");
-            if (nameValue == null || String.valueOf(nameValue).isBlank()) {
-                throw new IllegalArgumentException("Process group name must not be blank");
-            }
-            final String name = String.valueOf(nameValue);
+            final String name = requireProcessGroupName(processGroupSpec);
             final Map<String, Object> existingChild =
                     resolver.findUniqueChildProcessGroup(parentProcessGroupId, name, nifi);
             if (existingChild != null) {
@@ -104,6 +109,7 @@ final class DeploymentPreparationStage {
                         NiFiClientOperations.doubleValue(processGroupSpec.getOrDefault("y", 300)));
                 effectiveProcessGroupId = requireEntityId(createdProcessGroup, "created process group");
                 ledger.setChildProcessGroupId(effectiveProcessGroupId);
+                ledger.addChangedCanvasId(effectiveProcessGroupId);
                 effectiveSnapshot = null;
                 previousBinding = null;
             }
@@ -116,6 +122,14 @@ final class DeploymentPreparationStage {
                 effectiveSnapshot,
                 inventoryResponse,
                 effectiveFlow(inventoryResponse));
+    }
+
+    private static String requireProcessGroupName(final Map<String, Object> processGroupSpec) {
+        final Object nameValue = processGroupSpec.get("name");
+        if (nameValue == null || String.valueOf(nameValue).isBlank()) {
+            throw new IllegalArgumentException("Process group name must not be blank");
+        }
+        return String.valueOf(nameValue);
     }
 
     private static Map<String, Object> captureSnapshot(

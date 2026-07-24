@@ -51,6 +51,7 @@ public class FlowDeploymentMetricsRegistry {
         DEPENDENCY_DEPLOYMENT,
         COMPONENT_DEPLOYMENT,
         CONNECTION_CONFIGURATION,
+        LAYOUT,
         RUNTIME_ACTIVATION
     }
 
@@ -92,6 +93,8 @@ public class FlowDeploymentMetricsRegistry {
 
     public enum RollbackOutcome { SUCCESS, PARTIAL_FAILURE }
 
+    public enum LayoutOutcome { SUCCESS, FAILURE, SKIPPED }
+
     // =========================================================================
     // Snapshot types (immutable point-in-time records)
     // =========================================================================
@@ -106,6 +109,13 @@ public class FlowDeploymentMetricsRegistry {
      */
     public record StageMetrics(long count, long totalDurationMillis, long maxDurationMillis) {}
 
+    public record LayoutMetrics(
+            long count,
+            long totalDurationMillis,
+            long maxDurationMillis,
+            long movedComponentCount,
+            long routedConnectionCount) {}
+
     /**
      * Comprehensive immutable point-in-time snapshot of all deployment metrics.
      * Map keys are enum names joined with {@code "|"}, e.g. {@code "PREPARATION|SUCCESS"}.
@@ -116,7 +126,8 @@ public class FlowDeploymentMetricsRegistry {
             Map<String, StageMetrics> stages,
             Map<String, Long> components,
             Map<String, Long> rollbackActions,
-            Map<String, Long> rollbacks) {}
+            Map<String, Long> rollbacks,
+            Map<String, LayoutMetrics> layouts) {}
 
     // =========================================================================
     // Mutable accumulators
@@ -132,6 +143,8 @@ public class FlowDeploymentMetricsRegistry {
     private final ConcurrentHashMap<String, LongAdder> rollbackActionCounts = new ConcurrentHashMap<>();
     // key: RollbackOutcome.name()
     private final ConcurrentHashMap<String, LongAdder> rollbackCounts = new ConcurrentHashMap<>();
+    // key: layoutModeName + "|" + LayoutOutcome.name() (e.g. "ENGINE|SUCCESS")
+    private final ConcurrentHashMap<String, LayoutStats> layoutStats = new ConcurrentHashMap<>();
 
     // =========================================================================
     // Observation methods (all non-throwing)
@@ -213,6 +226,31 @@ public class FlowDeploymentMetricsRegistry {
         }
     }
 
+    /**
+     * Records mode-specific layout outcome, duration, repositioned count, and routed count.
+     * The mode name and outcome form a low-cardinality composite key.
+     *
+     * @param modeName the layout mode name (for example, "ENGINE" or "DISABLED")
+     * @param outcome SUCCESS, FAILURE, or SKIPPED
+     * @param startNanos {@link System#nanoTime()} captured at the start of the layout stage
+     * @param movedCount number of components repositioned by the engine
+     * @param routedCount number of connections re-routed by the engine
+     */
+    public void observeLayout(
+            final String modeName,
+            final LayoutOutcome outcome,
+            final long startNanos,
+            final int movedCount,
+            final int routedCount) {
+        try {
+            final String key = modeName + "|" + outcome.name();
+            layoutStats.computeIfAbsent(key, k -> new LayoutStats())
+                    .record(System.nanoTime() - startNanos, movedCount, routedCount);
+        } catch (Throwable ignored) {
+            ignoreMetricFailure(ignored);
+        }
+    }
+
     private static void ignoreMetricFailure(final Throwable ignored) {
         // Observation must never alter deployment or rollback behavior, including during VM pressure.
     }
@@ -246,12 +284,17 @@ public class FlowDeploymentMetricsRegistry {
         for (final Map.Entry<String, LongAdder> e : rollbackCounts.entrySet()) {
             rollbacks.put(e.getKey(), e.getValue().sum());
         }
+        final Map<String, LayoutMetrics> layouts = new LinkedHashMap<>();
+        for (final Map.Entry<String, LayoutStats> e : layoutStats.entrySet()) {
+            layouts.put(e.getKey(), toLayoutMetrics(e.getValue()));
+        }
         return new Snapshot(
                 Collections.unmodifiableMap(deployments),
                 Collections.unmodifiableMap(stages),
                 Collections.unmodifiableMap(components),
                 Collections.unmodifiableMap(rollbackActions),
-                Collections.unmodifiableMap(rollbacks));
+                Collections.unmodifiableMap(rollbacks),
+                Collections.unmodifiableMap(layouts));
     }
 
     // =========================================================================
@@ -271,6 +314,18 @@ public class FlowDeploymentMetricsRegistry {
         }
     }
 
+    static final class LayoutStats {
+        final DurationStats duration = new DurationStats();
+        final LongAdder movedComponentCount = new LongAdder();
+        final LongAdder routedConnectionCount = new LongAdder();
+
+        void record(final long durationNanos, final int movedCount, final int routedCount) {
+            duration.record(durationNanos);
+            movedComponentCount.add(movedCount);
+            routedConnectionCount.add(routedCount);
+        }
+    }
+
     private static DeploymentMetrics toDeploymentMetrics(final DurationStats stats) {
         return new DeploymentMetrics(
                 stats.count.sum(),
@@ -283,5 +338,14 @@ public class FlowDeploymentMetricsRegistry {
                 stats.count.sum(),
                 stats.totalDurationMillis.sum(),
                 stats.maxDurationMillis.get());
+    }
+
+    private static LayoutMetrics toLayoutMetrics(final LayoutStats stats) {
+        return new LayoutMetrics(
+                stats.duration.count.sum(),
+                stats.duration.totalDurationMillis.sum(),
+                stats.duration.maxDurationMillis.get(),
+                stats.movedComponentCount.sum(),
+                stats.routedConnectionCount.sum());
     }
 }

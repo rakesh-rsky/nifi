@@ -44,7 +44,7 @@ public class HttpNiFiClient implements NiFiClientOperations {
     private final String baseUrl;
     private final Duration requestTimeout;
     private volatile String token;
-    private final Map<String, Map<String, Object>> typeBundleCache = new HashMap<>();
+    private volatile Map<String, Map<String, Object>> typeBundleCache;
 
     public HttpNiFiClient(final NiFiConfigResolver config, final NiFiRetryPolicy retryPolicy,
             final NiFiAsyncRequestExecutor asyncExecutor) {
@@ -447,28 +447,49 @@ public class HttpNiFiClient implements NiFiClientOperations {
 
     @Override
     public void ensureTypeCache() {
-        if (!typeBundleCache.isEmpty()) {
+        if (typeBundleCache != null) {
             return;
         }
-        final Map<String, Object> data = get("/flow/processor-types");
-        final List<?> types = (List<?>) data.getOrDefault("processorTypes", List.of());
-        for (Object obj : types) {
-            final Map<String, Object> type = (Map<String, Object>) obj;
-            final String fqn = String.valueOf(type.getOrDefault("type", ""));
-            final Map<String, Object> bundle = (Map<String, Object>) type.get("bundle");
-            if (!fqn.isBlank() && bundle != null) {
-                typeBundleCache.putIfAbsent(fqn, bundle);
+        synchronized (this) {
+            if (typeBundleCache != null) {
+                return;
             }
+            final Map<String, Object> data = get("/flow/processor-types");
+            final Object rawTypes = data.get("processorTypes");
+            if (rawTypes != null && !(rawTypes instanceof List<?>)) {
+                throw new IllegalStateException("NiFi processor-types response contains an invalid processorTypes field");
+            }
+            final Map<String, Map<String, Object>> initialized = new HashMap<>();
+            for (Object rawType : rawTypes == null ? List.of() : (List<?>) rawTypes) {
+                if (!(rawType instanceof Map<?, ?> type)) {
+                    throw new IllegalStateException("NiFi processor-types response contains an invalid type entry");
+                }
+                final Object rawFqn = type.get("type");
+                final Object rawBundle = type.get("bundle");
+                if (!(rawFqn instanceof String fqn) || fqn.isBlank() || !(rawBundle instanceof Map<?, ?> bundle)) {
+                    throw new IllegalStateException("NiFi processor-types response contains an incomplete type entry");
+                }
+                final Map<String, Object> immutableBundle = new HashMap<>();
+                for (Map.Entry<?, ?> entry : bundle.entrySet()) {
+                    if (!(entry.getKey() instanceof String key)) {
+                        throw new IllegalStateException("NiFi processor-types response contains an invalid bundle field");
+                    }
+                    immutableBundle.put(key, entry.getValue());
+                }
+                initialized.putIfAbsent(fqn, Map.copyOf(immutableBundle));
+            }
+            typeBundleCache = Map.copyOf(initialized);
         }
     }
 
     private Map.Entry<String, Map<String, Object>> resolveBundle(final String processorType) {
         ensureTypeCache();
-        if (typeBundleCache.containsKey(processorType)) {
-            return Map.entry(processorType, typeBundleCache.get(processorType));
+        final Map<String, Map<String, Object>> cachedTypes = typeBundleCache;
+        if (cachedTypes.containsKey(processorType)) {
+            return Map.entry(processorType, cachedTypes.get(processorType));
         }
         final String simple = processorType.substring(processorType.lastIndexOf('.') + 1).toLowerCase();
-        for (Map.Entry<String, Map<String, Object>> entry : typeBundleCache.entrySet()) {
+        for (Map.Entry<String, Map<String, Object>> entry : cachedTypes.entrySet()) {
             final String keySimple = entry.getKey().substring(entry.getKey().lastIndexOf('.') + 1).toLowerCase();
             if (keySimple.equals(simple)) {
                 return Map.entry(entry.getKey(), entry.getValue());
@@ -644,17 +665,22 @@ public class HttpNiFiClient implements NiFiClientOperations {
     @Override
     public List<Map<String, Object>> listControllerServices(final String pgId) {
         final Map<String, Object> data = get("/flow/process-groups/" + pgId + "/controller-services");
-        final List<?> services = (List<?>) data.getOrDefault("controllerServices", List.of());
+        final Object rawServices = data.get("controllerServices");
+        if (rawServices != null && !(rawServices instanceof List<?>)) {
+            throw new IllegalStateException("NiFi controller-services response contains an invalid controllerServices field");
+        }
         final List<Map<String, Object>> out = new ArrayList<>();
-        for (Object raw : services) {
-            final Map<String, Object> service = (Map<String, Object>) raw;
-            final Map<String, Object> component = (Map<String, Object>) service.get("component");
+        for (Object raw : rawServices == null ? List.of() : (List<?>) rawServices) {
+            if (!(raw instanceof Map<?, ?> service) || !(service.get("component") instanceof Map<?, ?> component)) {
+                throw new IllegalStateException("NiFi controller-services response contains an invalid service entry");
+            }
             final Map<String, Object> projected = new HashMap<>();
             projected.put("id", service.get("id"));
             projected.put("name", component.get("name"));
             projected.put("type", component.get("type"));
-            projected.put("state", component.getOrDefault("state", "DISABLED"));
+            projected.put("state", component.containsKey("state") ? component.get("state") : "DISABLED");
             projected.put("parentGroupId", component.get("parentGroupId"));
+            projected.put("properties", component.containsKey("properties") ? component.get("properties") : Map.of());
             out.add(projected);
         }
         return out;
@@ -1101,6 +1127,14 @@ public class HttpNiFiClient implements NiFiClientOperations {
     }
 
     @Override
+    public Map<String, Object> getConnection(final String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            throw new IllegalArgumentException("connectionId must not be blank");
+        }
+        return get("/connections/" + connectionId);
+    }
+
+    @Override
     public Map<String, Object> updateConnection(final String connectionId, final Map<String, Object> updates) {
         if (connectionId == null || connectionId.isBlank()) {
             throw new IllegalArgumentException("connectionId must not be blank");
@@ -1443,6 +1477,56 @@ public class HttpNiFiClient implements NiFiClientOperations {
             final NiFiRevision revision = NiFiRevision.fromEntity(entity);
             delete("/output-ports/" + portId, "version=" + revision.version() + "&clientId=" + UUID.randomUUID());
         });
+    }
+
+    @Override
+    public Map<String, Object> updateInputPort(final String portId, final Map<String, Object> updates) {
+        if (portId == null || portId.isBlank()) {
+            throw new IllegalArgumentException("portId must not be blank");
+        }
+        if (updates == null || updates.isEmpty()) {
+            throw new IllegalArgumentException("updates must not be null or empty");
+        }
+        final AtomicReference<Map<String, Object>> result = new AtomicReference<>();
+        executeWithRevisionRetry("update input port " + portId, () -> {
+            final Map<String, Object> entity = get("/input-ports/" + portId);
+            final NiFiRevision revision = NiFiRevision.fromEntity(entity);
+            final Map<String, Object> component = new HashMap<>(updates);
+            component.remove("id");
+            component.remove("revision");
+            component.put("id", portId);
+            final Map<String, Object> body = Map.of(
+                    "revision", revision.toMap(),
+                    "component", component
+            );
+            result.set(put("/input-ports/" + portId, body));
+        });
+        return result.get();
+    }
+
+    @Override
+    public Map<String, Object> updateOutputPort(final String portId, final Map<String, Object> updates) {
+        if (portId == null || portId.isBlank()) {
+            throw new IllegalArgumentException("portId must not be blank");
+        }
+        if (updates == null || updates.isEmpty()) {
+            throw new IllegalArgumentException("updates must not be null or empty");
+        }
+        final AtomicReference<Map<String, Object>> result = new AtomicReference<>();
+        executeWithRevisionRetry("update output port " + portId, () -> {
+            final Map<String, Object> entity = get("/output-ports/" + portId);
+            final NiFiRevision revision = NiFiRevision.fromEntity(entity);
+            final Map<String, Object> component = new HashMap<>(updates);
+            component.remove("id");
+            component.remove("revision");
+            component.put("id", portId);
+            final Map<String, Object> body = Map.of(
+                    "revision", revision.toMap(),
+                    "component", component
+            );
+            result.set(put("/output-ports/" + portId, body));
+        });
+        return result.get();
     }
 
     @Override

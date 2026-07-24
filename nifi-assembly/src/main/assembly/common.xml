@@ -174,7 +174,7 @@
             <useTransitiveDependencies>false</useTransitiveDependencies>
             <useStrictFiltering>true</useStrictFiltering>
             <includes>
-                <include>org.apache.nifi:nifi-copilot</include>
+                <include>org.apache.nifi:nifi-copilot:jar:exec</include>
             </includes>
         </dependencySet>
     </dependencySets>

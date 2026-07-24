@@ -26,8 +26,7 @@ final class PortDeployer {
             final String collection,
             final String connectableType,
             final boolean input,
-            final CanvasLayoutEngine canvasLayoutEngine,
-            final CollisionAvoider collisionAvoider,
+            final CanvasPositionProvider positionProvider,
             final ComponentRegistry components,
             final OwnershipLedger ledger,
             final ComponentResolver resolver,
@@ -52,13 +51,13 @@ final class PortDeployer {
                         : FlowDeploymentMetricsRegistry.ComponentAction.REUSED;
                 final String nifiId;
                 if (match == null) {
-                    final double[] position =
-                            canvasLayoutEngine.claimPortPosition(portSpec, collisionAvoider);
+                    final double[] position = positionProvider.provisionalPosition(portSpec);
                     final Map<String, Object> result = input
                             ? nifi.createInputPort(processGroupId, name, position[0], position[1])
                             : nifi.createOutputPort(processGroupId, name, position[0], position[1]);
                     nifiId = requireEntityId(result, "created " + connectableType);
-                    ledger.addCanvasAction("delete " + connectableType + " " + nifiId, () -> {
+                    ledger.addChangedCanvasId(nifiId);
+                    ledger.addCanvasDeletionAction("delete " + connectableType + " " + nifiId, () -> {
                         if (input) {
                             nifi.deleteInputPort(nifiId);
                         } else {

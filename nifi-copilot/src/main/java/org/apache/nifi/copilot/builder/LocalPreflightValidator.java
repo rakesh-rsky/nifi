@@ -25,6 +25,21 @@ final class LocalPreflightValidator {
         }
     }
 
+    static void validateConnectionTopology(final List<Map<String, Object>> connections) {
+        for (int index = 0; index < connections.size(); index++) {
+            final Map<String, Object> connection = connections.get(index);
+            final String source = SpecificationSupport.requireNonBlank(
+                    connection.get("from"), "connection from");
+            final String destination = SpecificationSupport.requireNonBlank(
+                    connection.get("to"), "connection to");
+            if (source.equals(destination) && !Boolean.TRUE.equals(connection.get("allow_self_loop"))) {
+                throw new IllegalArgumentException("Connection at index " + index + " links '" + source
+                        + "' to itself; omit unused relationships so NiFi can auto-terminate them, "
+                        + "or set allow_self_loop=true for an intentional feedback loop");
+            }
+        }
+    }
+
     private static void validateUniqueId(
             final Object idValue,
             final String collection,

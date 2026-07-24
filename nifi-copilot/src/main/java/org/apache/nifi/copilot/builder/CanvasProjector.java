@@ -68,6 +68,7 @@ final class CanvasProjector {
         final Map<String, Object> canvas = new LinkedHashMap<>();
         canvas.put("process_group_id", pgId);
         canvas.put("processors", processors);
+        canvas.put("connections", projectConnections(flow));
         canvas.put("process_groups", projectProcessGroups(flow));
         canvas.put("controller_services", controllerServices);
         canvas.put("input_ports", projectPorts(flow, "inputPorts"));
@@ -76,6 +77,39 @@ final class CanvasProjector {
         canvas.put("labels", projectLabels(flow));
         canvas.put("remote_process_groups", projectRemoteProcessGroups(flow));
         return canvas;
+    }
+
+    private static List<Map<String, Object>> projectConnections(final Map<String, Object> flow) {
+        final List<Map<String, Object>> projected = new ArrayList<>();
+        for (Map<String, Object> entity : listOfMap(flow.get("connections"))) {
+            final Map<String, Object> component = mapOrEmpty(entity.get("component"));
+            final String id = entityId(entity);
+            final String sourceId = endpointId(entity, component, "source");
+            final String destinationId = endpointId(entity, component, "destination");
+            if (id == null || sourceId == null || destinationId == null) {
+                logger.warn("Omitting canvas connection without an ID or endpoint");
+                continue;
+            }
+            final Map<String, Object> item = stableProjection(id);
+            item.put("from", sourceId);
+            item.put("to", destinationId);
+            item.put("relationships", componentValueOrDefault(
+                    component, entity, "selectedRelationships", List.of()));
+            projected.add(item);
+        }
+        return projected;
+    }
+
+    private static String endpointId(
+            final Map<String, Object> entity,
+            final Map<String, Object> component,
+            final String endpointName) {
+        final Map<String, Object> endpoint = componentMap(entity, component, endpointName);
+        final Object nestedId = endpoint.get("id");
+        final Object fallbackId = componentValueOrDefault(
+                component, entity, endpointName + "Id", null);
+        final Object id = nestedId == null ? fallbackId : nestedId;
+        return id == null || String.valueOf(id).isBlank() ? null : String.valueOf(id);
     }
 
     private static List<Map<String, Object>> projectProcessGroups(final Map<String, Object> flow) {

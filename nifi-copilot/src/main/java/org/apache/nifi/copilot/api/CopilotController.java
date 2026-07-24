@@ -176,19 +176,24 @@ public class CopilotController {
         }
         List<Map<String, Object>> existingCs = new ArrayList<>();
         List<Map<String, Object>> existingGroups = new ArrayList<>();
+        List<Map<String, Object>> existingConnections = new ArrayList<>();
         if (req.read_canvas) {
             try {
                 final Map<String, Object> canvas = flowBuilder.readCanvas(nifiClient, req.process_group_id);
                 final List<Map<String, Object>> canvasProcs = (List<Map<String, Object>>) canvas.getOrDefault("processors", List.of());
                 existingCs = (List<Map<String, Object>>) canvas.getOrDefault("controller_services", List.of());
                 existingGroups = (List<Map<String, Object>>) canvas.getOrDefault("process_groups", List.of());
+                existingConnections =
+                        (List<Map<String, Object>>) canvas.getOrDefault("connections", List.of());
                 final List<String> tracked = existing.stream().map(e -> String.valueOf(e.get("nifi_id"))).toList();
                 for (Map<String, Object> cp : canvasProcs) {
                     if (!tracked.contains(String.valueOf(cp.get("nifi_id")))) {
                         existing.add(cp);
                     }
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                logger.warn("Could not read canvas context for process group {}: {}",
+                        req.process_group_id, e.getMessage());
             }
         }
 
@@ -198,13 +203,15 @@ public class CopilotController {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated with AWS Bedrock.");
             }
             spec = llmClient.generateFlowSpecBedrock(req.message, history,
-                    awsAuthManager.getBedrockCredentials(), existing, req.model, existingCs, existingGroups);
+                    awsAuthManager.getBedrockCredentials(), existing, req.model,
+                    existingCs, existingGroups, existingConnections);
         } else {
             if (!githubAuthManager.isAuthenticated()) {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated with GitHub.");
             }
             spec = llmClient.generateFlowSpec(req.message, history,
-                    githubAuthManager.getGitHubToken(), existing, req.model, existingCs, existingGroups);
+                    githubAuthManager.getGitHubToken(), existing, req.model,
+                    existingCs, existingGroups, existingConnections);
         }
 
         String explanation = String.valueOf(spec.getOrDefault("explanation", "Done!"));

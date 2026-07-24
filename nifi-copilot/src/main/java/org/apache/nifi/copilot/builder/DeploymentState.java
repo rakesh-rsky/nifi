@@ -19,7 +19,9 @@ final class DeploymentState {
 
     // Set by DeploymentPreparationStage.prepareTarget
     private DeploymentTarget target;
-    private CollisionAvoider collisionAvoider;
+
+    // Set by DependencyPreflightStage
+    private ControllerServiceDeployer.DeploymentPlan controllerServicePlan;
 
     // Set by ComponentDeploymentStage
     private ComponentRegistry components;
@@ -76,12 +78,12 @@ final class DeploymentState {
         this.target = target;
     }
 
-    CollisionAvoider collisionAvoider() {
-        return collisionAvoider;
+    ControllerServiceDeployer.DeploymentPlan controllerServicePlan() {
+        return controllerServicePlan;
     }
 
-    void setCollisionAvoider(final CollisionAvoider collisionAvoider) {
-        this.collisionAvoider = collisionAvoider;
+    void setControllerServicePlan(final ControllerServiceDeployer.DeploymentPlan controllerServicePlan) {
+        this.controllerServicePlan = controllerServicePlan;
     }
 
     ComponentRegistry components() {

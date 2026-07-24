@@ -17,7 +17,7 @@ final class ConnectionConfigurationStage {
     static void deploy(
             final DeploymentState state,
             final ComponentResolver resolver,
-            final CanvasLayoutEngine layoutEngine) {
+            final CanvasPositionProvider positionProvider) {
         final DeploymentContext context = state.context();
         final Map<String, Object> spec = context.specification();
         final String pgId = state.target().effectiveProcessGroupId();
@@ -34,7 +34,7 @@ final class ConnectionConfigurationStage {
                 state.managedProcessors(), connections, components, resolver, context.nifi(), metrics);
 
         SnippetDeployer.deploy(listOfMap(spec.get("snippets")), pgId,
-                components, state.ledger(), resolver, layoutEngine, context.nifi(), metrics);
+                components, state.ledger(), resolver, positionProvider, context.nifi(), metrics);
 
         state.setConnectionsCreated(connectionsCreated);
     }

@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.apache.nifi.copilot.service.NiFiClientOperations;
@@ -32,13 +33,55 @@ final class ControllerServiceDeployer {
             final ComponentResolver resolver,
             final NiFiClientOperations nifi,
             final FlowDeploymentMetricsRegistry metrics) {
-        final List<Map<String, Object>> existing = nifi.listControllerServices(pgId);
+        deployAll(preflightAll(services, nifi.listControllerServices(pgId), resolver),
+                pgId, ledger, nifi, metrics);
+    }
+
+    DeploymentPlan preflightAll(
+            final List<Map<String, Object>> services,
+            final List<Map<String, Object>> existing,
+            final ComponentResolver resolver) {
+        final List<PlannedService> plannedServices = new ArrayList<>();
+        final Map<String, String> reusableMappings = new HashMap<>(specToNifi);
         for (Map<String, Object> controllerService : dependencyOrder(services)) {
             final String specId = String.valueOf(controllerService.get("id"));
             final String serviceName = String.valueOf(controllerService.get("name"));
             final String serviceType = String.valueOf(controllerService.get("type"));
             final Map<String, Object> reuse =
                     resolver.matchControllerService(existing, serviceName, serviceType);
+            if (reuse != null) {
+                reusableMappings.put(specId, String.valueOf(reuse.get("id")));
+            }
+            plannedServices.add(new PlannedService(
+                    specId, serviceName, serviceType,
+                    mapOrEmpty(controllerService.get("properties")), reuse));
+        }
+
+        for (PlannedService plannedService : plannedServices) {
+            if (plannedService.reuse() != null) {
+                requireMatchingProperties(
+                        plannedService.serviceName(),
+                        resolveCsReferences(plannedService.properties(), reusableMappings),
+                        mapOrEmpty(plannedService.reuse().get("properties")));
+            }
+        }
+        return new DeploymentPlan(List.copyOf(plannedServices), Map.copyOf(reusableMappings));
+    }
+
+    void deployAll(
+            final DeploymentPlan plan,
+            final String pgId,
+            final OwnershipLedger ledger,
+            final NiFiClientOperations nifi,
+            final FlowDeploymentMetricsRegistry metrics) {
+        specToNifi.putAll(plan.reusableMappings());
+        for (PlannedService plannedService : plan.services()) {
+            final String specId = plannedService.specId();
+            final String serviceName = plannedService.serviceName();
+            final String serviceType = plannedService.serviceType();
+            final Map<String, Object> reuse = plannedService.reuse();
+            final Map<String, Object> requestedProperties =
+                    resolveCsReferences(plannedService.properties());
             try {
                 final String nifiId;
                 final boolean alreadyEnabled;
@@ -52,7 +95,7 @@ final class ControllerServiceDeployer {
                             pgId,
                             serviceType,
                             serviceName,
-                            resolveCsReferences(mapOrEmpty(controllerService.get("properties"))));
+                            requestedProperties);
                     final Object resultId = result.get("id");
                     if (resultId == null || String.valueOf(resultId).isBlank()) {
                         throw new IllegalStateException("Controller service creation returned no ID");
@@ -80,6 +123,10 @@ final class ControllerServiceDeployer {
         }
     }
 
+    static DeploymentPlan emptyPlan() {
+        return new DeploymentPlan(List.of(), Map.of());
+    }
+
     /**
      * Replaces spec-level controller-service ID references in {@code properties} with
      * their resolved NiFi IDs.  Returns {@code properties} unchanged when no mapping exists.
@@ -88,12 +135,45 @@ final class ControllerServiceDeployer {
         if (specToNifi.isEmpty()) {
             return properties;
         }
+        return resolveCsReferences(properties, specToNifi);
+    }
+
+    private static Map<String, Object> resolveCsReferences(
+            final Map<String, Object> properties,
+            final Map<String, String> references) {
         final Map<String, Object> out = new HashMap<>();
         for (var e : properties.entrySet()) {
-            out.put(e.getKey(),
-                    specToNifi.getOrDefault(String.valueOf(e.getValue()), String.valueOf(e.getValue())));
+            final Object value = e.getValue();
+            out.put(e.getKey(), value == null
+                    ? null
+                    : references.getOrDefault(String.valueOf(value), String.valueOf(value)));
         }
         return out;
+    }
+
+    private static void requireMatchingProperties(
+            final String serviceName,
+            final Map<String, Object> requested,
+            final Map<String, Object> existing) {
+        final List<String> mismatches = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : requested.entrySet()) {
+            final String field = entry.getKey();
+            if (!existing.containsKey(field) || !Objects.deepEquals(entry.getValue(), existing.get(field))) {
+                mismatches.add(field + " (requested=" + safeRepresentation(true, entry.getValue())
+                        + ", existing=" + safeRepresentation(existing.containsKey(field), existing.get(field)) + ")");
+            }
+        }
+        if (!mismatches.isEmpty()) {
+            throw new IllegalStateException("Existing controller service '" + serviceName
+                    + "' has incompatible properties: " + String.join(", ", mismatches));
+        }
+    }
+
+    private static String safeRepresentation(final boolean present, final Object value) {
+        if (!present) {
+            return "<missing>";
+        }
+        return value == null ? "<null-or-sensitive>" : "<provided>";
     }
 
     private static List<Map<String, Object>> dependencyOrder(
@@ -154,5 +234,16 @@ final class ControllerServiceDeployer {
             }
         }
         return dependencies;
+    }
+
+    record DeploymentPlan(List<PlannedService> services, Map<String, String> reusableMappings) {
+    }
+
+    private record PlannedService(
+            String specId,
+            String serviceName,
+            String serviceType,
+            Map<String, Object> properties,
+            Map<String, Object> reuse) {
     }
 }

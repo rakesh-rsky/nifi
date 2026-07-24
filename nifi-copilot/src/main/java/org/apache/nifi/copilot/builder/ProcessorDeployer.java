@@ -27,7 +27,7 @@ final class ProcessorDeployer {
     /**
      * Iterates {@code processorSpecs}, creating new processors or updating existing ones.
      * Controller-service property references are resolved via {@code csDeployer}.
-     * Default coordinates are obtained from {@code layoutEngine} for processors without
+     * Default coordinates are obtained from {@code positionProvider} for processors without
      * an existing NiFi ID.
      *
      * <p>Ownership registration timing:
@@ -40,7 +40,7 @@ final class ProcessorDeployer {
             final List<Map<String, Object>> processorSpecs,
             final String processGroupId,
             final ControllerServiceDeployer csDeployer,
-            final CanvasLayoutEngine layoutEngine,
+            final CanvasPositionProvider positionProvider,
             final ComponentRegistry components,
             final OwnershipLedger ledger,
             final ComponentResolver resolver,
@@ -58,11 +58,11 @@ final class ProcessorDeployer {
                 final Map<String, Object> configuration = csDeployer.resolveCsReferences(
                         mapOrEmpty(processorSpec.get("config")));
                 final Double x = processorSpec.containsKey("x")
-                        ? NiFiClientOperations.doubleValue(processorSpec.get("x"))
-                        : existingId == null ? layoutEngine.defaultX() : null;
+                        ? Double.valueOf(NiFiClientOperations.doubleValue(processorSpec.get("x")))
+                        : existingId == null ? Double.valueOf(positionProvider.defaultX()) : null;
                 final Double y = processorSpec.containsKey("y")
-                        ? NiFiClientOperations.doubleValue(processorSpec.get("y"))
-                        : existingId == null ? layoutEngine.defaultY() : null;
+                        ? Double.valueOf(NiFiClientOperations.doubleValue(processorSpec.get("y")))
+                        : existingId == null ? Double.valueOf(positionProvider.defaultY()) : null;
                 if (existingId != null && !existingId.isBlank()) {
                     updateExistingProcessor(existingId, processorName, x, y, configuration, ledger, nifi);
                     final Map<String, Object> managedEntry = new LinkedHashMap<>();
@@ -72,6 +72,7 @@ final class ProcessorDeployer {
                     managedEntry.put("type", processorType);
                     managedProcessors.add(managedEntry);
                     components.recordProcessorId(specId, existingId);
+                    ledger.addChangedCanvasId(existingId);
                 } else {
                     final Map<String, Object> result = nifi.createProcessor(
                             processGroupId,
@@ -88,6 +89,7 @@ final class ProcessorDeployer {
                     createdProcessors.add(createdEntry);
                     managedProcessors.add(createdEntry);
                     components.recordProcessorId(specId, processorId);
+                    ledger.addChangedCanvasId(processorId);
                     ledger.addCreatedProcessorId(processorId);
                 }
                 metrics.observeComponent(FlowDeploymentMetricsRegistry.Resource.PROCESSOR,

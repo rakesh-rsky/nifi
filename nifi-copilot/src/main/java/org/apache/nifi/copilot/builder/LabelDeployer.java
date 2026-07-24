@@ -22,8 +22,7 @@ final class LabelDeployer {
             final List<Map<String, Object>> specs,
             final String processGroupId,
             final Map<String, Object> flow,
-            final CanvasLayoutEngine canvasLayoutEngine,
-            final CollisionAvoider collisionAvoider,
+            final CanvasPositionProvider positionProvider,
             final ComponentRegistry components,
             final OwnershipLedger ledger,
             final ComponentResolver resolver,
@@ -46,19 +45,19 @@ final class LabelDeployer {
                         : FlowDeploymentMetricsRegistry.ComponentAction.UPDATED;
                 final String nifiId;
                 if (match == null) {
-                    final double[] position =
-                            canvasLayoutEngine.claimLabelPosition(labelSpec, collisionAvoider);
+                    final double[] position = positionProvider.provisionalPosition(labelSpec);
                     final Map<String, Object> result = nifi.createLabel(processGroupId, text,
                             position[0], position[1], style,
                             nullableNumber(labelSpec.get("width"), "label width"),
                             nullableNumber(labelSpec.get("height"), "label height"));
                     nifiId = requireEntityId(result, "created label");
-                    ledger.addCanvasAction("delete label " + nifiId, () -> nifi.deleteLabel(nifiId));
+                    ledger.addChangedCanvasId(nifiId);
+                    ledger.addCanvasDeletionAction("delete label " + nifiId, () -> nifi.deleteLabel(nifiId));
                 } else {
                     nifiId = requireEntityId(match, "label");
                     final Map<String, Object> component = new LinkedHashMap<>(mapOrEmpty(match.get("component")));
                     final Map<String, Object> updates =
-                            canvasLayoutEngine.requestedPosition(labelSpec, component);
+                            positionProvider.requestedPosition(labelSpec, component);
                     updates.put("label", text);
                     if (labelSpec.containsKey("style")) {
                         updates.put("style", style);
@@ -73,6 +72,7 @@ final class LabelDeployer {
                             () -> nifi.updateLabel(nifiId,
                                     restoreFields(component, "label", "position", "style", "width", "height")));
                     nifi.updateLabel(nifiId, updates);
+                    ledger.addChangedCanvasId(nifiId);
                 }
                 components.register(specId, nifiId, "LABEL");
                 metrics.observeComponent(FlowDeploymentMetricsRegistry.Resource.LABEL,
