@@ -10,6 +10,7 @@ import static org.apache.nifi.copilot.builder.SpecificationSupport.stringOrNull;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -291,19 +292,26 @@ final class ComponentResolver {
             final Map<String, Object> context,
             final Map<String, String> requested) {
         final Map<String, String> nonSensitive = new HashMap<>();
+        final Set<String> sensitive = new HashSet<>();
         final Map<String, Object> component = mapOrEmpty(context.get("component"));
         for (Map<String, Object> parameterEntry : listOfMap(component.get("parameters"))) {
             final Map<String, Object> parameter = mapOrEmpty(parameterEntry.get("parameter"));
             final Object parameterName = parameter.get("name");
-            if (parameterName == null || Boolean.parseBoolean(String.valueOf(parameter.get("sensitive")))) {
+            if (parameterName == null) {
+                continue;
+            }
+            final String name = String.valueOf(parameterName);
+            if (Boolean.parseBoolean(String.valueOf(parameter.get("sensitive")))) {
+                sensitive.add(name);
                 continue;
             }
             final Object value = parameter.get("value");
-            nonSensitive.put(String.valueOf(parameterName), value == null ? null : String.valueOf(value));
+            nonSensitive.put(name, value == null ? null : String.valueOf(value));
         }
         for (var entry : requested.entrySet()) {
-            if (!nonSensitive.containsKey(entry.getKey())
-                    || !Objects.equals(nonSensitive.get(entry.getKey()), entry.getValue())) {
+            if (!sensitive.contains(entry.getKey())
+                    && (!nonSensitive.containsKey(entry.getKey())
+                    || !Objects.equals(nonSensitive.get(entry.getKey()), entry.getValue()))) {
                 return false;
             }
         }

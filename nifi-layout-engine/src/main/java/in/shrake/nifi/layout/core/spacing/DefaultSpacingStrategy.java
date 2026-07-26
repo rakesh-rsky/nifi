@@ -20,7 +20,6 @@ package in.shrake.nifi.layout.core.spacing;
 import in.shrake.nifi.layout.core.model.LayoutOptions;
 
 public class DefaultSpacingStrategy implements SpacingStrategy {
-
     @Override
     public SpacingValues computeSpacing(LayoutDimensions dimensions, int componentCount, LayoutOptions options) {
         return new SpacingValues(
@@ -32,5 +31,13 @@ public class DefaultSpacingStrategy implements SpacingStrategy {
                 options.getMarginRight(),
                 options.getPadding()
         );
+    }
+
+    @Override
+    public int computeRankSpacing(
+            final RankDemand demand,
+            final SpacingValues spacing,
+            final LayoutOptions options) {
+        return RankSpacingCalculator.calculate(demand, spacing, options);
     }
 }

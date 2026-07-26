@@ -48,7 +48,6 @@ final class ProcessorDeployer {
             final FlowDeploymentMetricsRegistry metrics) {
         final List<Map<String, Object>> createdProcessors = new ArrayList<>();
         final List<Map<String, Object>> managedProcessors = new ArrayList<>();
-        final List<Exception> failures = new ArrayList<>();
         for (Map<String, Object> processorSpec : processorSpecs) {
             final String specId = String.valueOf(processorSpec.get("id"));
             final String existingId = components.id(specId);
@@ -57,6 +56,7 @@ final class ProcessorDeployer {
                 final String processorName = resolver.resolveProcessorName(processorSpec, processorType);
                 final Map<String, Object> configuration = csDeployer.resolveCsReferences(
                         mapOrEmpty(processorSpec.get("config")));
+                final Map<String, Object> scheduling = mapOrEmpty(processorSpec.get("scheduling"));
                 final Double x = processorSpec.containsKey("x")
                         ? Double.valueOf(NiFiClientOperations.doubleValue(processorSpec.get("x")))
                         : existingId == null ? Double.valueOf(positionProvider.defaultX()) : null;
@@ -64,7 +64,8 @@ final class ProcessorDeployer {
                         ? Double.valueOf(NiFiClientOperations.doubleValue(processorSpec.get("y")))
                         : existingId == null ? Double.valueOf(positionProvider.defaultY()) : null;
                 if (existingId != null && !existingId.isBlank()) {
-                    updateExistingProcessor(existingId, processorName, x, y, configuration, ledger, nifi);
+                    updateExistingProcessor(
+                            existingId, processorName, x, y, configuration, scheduling, ledger, nifi);
                     final Map<String, Object> managedEntry = new LinkedHashMap<>();
                     managedEntry.put("spec_id", specId);
                     managedEntry.put("id", existingId);
@@ -91,6 +92,9 @@ final class ProcessorDeployer {
                     components.recordProcessorId(specId, processorId);
                     ledger.addChangedCanvasId(processorId);
                     ledger.addCreatedProcessorId(processorId);
+                    if (!scheduling.isEmpty()) {
+                        nifi.updateProcessor(processorId, Map.of("config", scheduling));
+                    }
                 }
                 metrics.observeComponent(FlowDeploymentMetricsRegistry.Resource.PROCESSOR,
                         (existingId != null && !existingId.isBlank())
@@ -103,12 +107,9 @@ final class ProcessorDeployer {
                                 ? FlowDeploymentMetricsRegistry.ComponentAction.UPDATED
                                 : FlowDeploymentMetricsRegistry.ComponentAction.CREATED,
                         FlowDeploymentMetricsRegistry.ActionOutcome.FAILURE);
-                failures.add(new IllegalStateException(
-                        "Processor '" + specId + "' deployment failed: " + e.getMessage(), e));
+                throw new IllegalStateException(
+                        "Processor '" + specId + "' deployment failed: " + e.getMessage(), e);
             }
-        }
-        if (!failures.isEmpty()) {
-            throwAggregated("Processor deployment", failures);
         }
         return new Result(createdProcessors, managedProcessors);
     }
@@ -119,6 +120,7 @@ final class ProcessorDeployer {
             final Double x,
             final Double y,
             final Map<String, Object> configuration,
+            final Map<String, Object> scheduling,
             final OwnershipLedger ledger,
             final NiFiClientOperations nifi) {
         final Map<String, Object> entity = nifi.getProcessor(processorId);
@@ -144,16 +146,13 @@ final class ProcessorDeployer {
                     "x", x == null ? numericValue(currentPosition.get("x"), 0) : x,
                     "y", y == null ? numericValue(currentPosition.get("y"), 0) : y));
         }
-        if (!configuration.isEmpty()) {
-            updates.put("config", Map.of("properties", configuration));
+        if (!configuration.isEmpty() || !scheduling.isEmpty()) {
+            final Map<String, Object> configUpdates = new LinkedHashMap<>(scheduling);
+            if (!configuration.isEmpty()) {
+                configUpdates.put("properties", configuration);
+            }
+            updates.put("config", configUpdates);
         }
         nifi.updateProcessor(processorId, updates);
-    }
-
-    private static void throwAggregated(final String stage, final List<Exception> failures) {
-        final IllegalStateException aggregate = new IllegalStateException(
-                stage + " failed with " + failures.size() + " error(s)");
-        failures.forEach(aggregate::addSuppressed);
-        throw aggregate;
     }
 }

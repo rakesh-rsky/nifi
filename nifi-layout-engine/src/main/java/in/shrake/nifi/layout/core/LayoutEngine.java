@@ -276,8 +276,11 @@ public class LayoutEngine {
                 affectedRoutes.put(route.getKey(), route.getValue());
             }
         }
+        List<String> routingWarnings = allRoutes.getWarnings().stream()
+            .map(Object::toString)
+            .collect(Collectors.toCollection(ArrayList::new));
         return new LayoutResult(updates, repositioned, affectedRoutes,
-            packedResult.getComputationTimeMs(), packedResult.getWarnings());
+            packedResult.getComputationTimeMs(), routingWarnings);
     }
 
     private LayoutResult executeSinglePipeline(LayoutGraph graph, LayoutOptions options,
@@ -319,13 +322,18 @@ public class LayoutEngine {
                 }
             }
         }
-        
+
+        List<String> warnings = new ArrayList<>();
+        if (routes != null) {
+            routes.getWarnings().forEach(w -> warnings.add(w.toString()));
+        }
+
         return new LayoutResult(
             updates, 
             repositioned, 
             routes != null ? routes.getEdgePaths() : Collections.emptyMap(), 
             durationMs, 
-            Collections.emptyList()
+            warnings
         );
     }
 

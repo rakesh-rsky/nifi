@@ -255,8 +255,8 @@ class ProcessGroupFlowMapAdapterTest {
         BoundingBox source = bounds.get("http");
         assertTrue(success.y() - source.bottom() >= LayoutOptions.defaults().getVerticalSpacing());
         assertTrue(failure.y() - source.bottom() >= LayoutOptions.defaults().getVerticalSpacing());
-        assertEquals(1, result.getConnectionBendPoints().get("success-route").size());
-        assertEquals(1, result.getConnectionBendPoints().get("failure-route").size());
+        assertEquals(4, result.getConnectionBendPoints().get("success-route").size());
+        assertEquals(4, result.getConnectionBendPoints().get("failure-route").size());
     }
 
     @Test
@@ -281,7 +281,7 @@ class ProcessGroupFlowMapAdapterTest {
         LayoutResult result = LayoutEngine.create().layout(
                 adapter.parse(flowMap("pg1", null, flow)), LayoutOptions.defaults());
         List<Position> labelAnchors = result.getConnectionBendPoints().values().stream()
-                .map(path -> path.get(1))
+                .map(path -> path.get(2))
                 .sorted(java.util.Comparator.comparingInt(Position::x))
                 .toList();
 
@@ -358,9 +358,9 @@ class ProcessGroupFlowMapAdapterTest {
                     result.getConnectionBendPoints().get("worker-" + i + "-success");
             List<Position> failurePath =
                     result.getConnectionBendPoints().get("worker-" + i + "-failure");
-            assertEquals(3, successPath.size());
-            assertEquals(3, failurePath.size());
-            assertTrue(Math.abs(successPath.get(1).y() - failurePath.get(1).y()) >= 50);
+            assertEquals(5, successPath.size());
+            assertEquals(5, failurePath.size());
+            assertTrue(Math.abs(successPath.get(2).y() - failurePath.get(2).y()) >= 50);
         }
     }
 

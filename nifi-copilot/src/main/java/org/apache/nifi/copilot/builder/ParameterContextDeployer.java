@@ -34,26 +34,28 @@ final class ParameterContextDeployer {
         if (parameterContextSpec == null) {
             return;
         }
-        final String name = String.valueOf(parameterContextSpec.get("name"));
+        final String requestedName = String.valueOf(parameterContextSpec.get("name"));
         final Map<String, String> params = new LinkedHashMap<>();
         for (var e : mapOrEmpty(parameterContextSpec.get("parameters")).entrySet()) {
             params.put(e.getKey(), String.valueOf(e.getValue()));
         }
-        final Map<String, Object> existing = resolver.findUniqueParameterContext(name, nifi);
+        String deploymentName = requestedName;
+        Map<String, Object> existing = resolver.findUniqueParameterContext(deploymentName, nifi);
+        int suffix = 2;
+        while (existing != null && !resolver.isParameterContextCompatible(existing, params)) {
+            deploymentName = requestedName + " (" + suffix++ + ")";
+            existing = resolver.findUniqueParameterContext(deploymentName, nifi);
+        }
         FlowDeploymentMetricsRegistry.ComponentAction componentAction =
                 FlowDeploymentMetricsRegistry.ComponentAction.CREATED;
         try {
             final String contextId;
             if (existing != null) {
-                if (!resolver.isParameterContextCompatible(existing, params)) {
-                    throw new IllegalStateException("Existing parameter context '" + name
-                            + "' is incompatible with the requested parameter values; refusing to mutate a shared context");
-                }
                 contextId = requireEntityId(existing, "parameter context");
                 componentAction = FlowDeploymentMetricsRegistry.ComponentAction.REUSED;
             } else {
                 final Map<String, Object> res = nifi.createParameterContext(
-                        name,
+                        deploymentName,
                         params,
                         String.valueOf(parameterContextSpec.getOrDefault("description", "")));
                 contextId = requireEntityId(res, "created parameter context");

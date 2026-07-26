@@ -26,6 +26,8 @@ import in.shrake.nifi.layout.core.model.LayoutOptions;
 import in.shrake.nifi.layout.core.model.NodeType;
 import in.shrake.nifi.layout.core.model.Position;
 import in.shrake.nifi.layout.core.spacing.LayoutDimensions;
+import in.shrake.nifi.layout.core.spacing.RankDemand;
+import in.shrake.nifi.layout.core.spacing.RankDemandCalculator;
 import in.shrake.nifi.layout.core.spacing.SpacingStrategy;
 import in.shrake.nifi.layout.core.spacing.SpacingValues;
 import in.shrake.nifi.layout.core.util.GridSnapper;
@@ -48,6 +50,7 @@ public class DefaultCoordinateAssigner implements LayoutAlgorithm {
     public CoordinateAssignment computeLayout(LayeredGraph layeredGraph, LayoutOptions options) {
         int nodeCount = layeredGraph.getOriginalGraph().getNodes().size() + layeredGraph.getVirtualNodes().size();
         SpacingValues spacing = spacingStrategy.computeSpacing(new LayoutDimensions(0, 0), nodeCount, options);
+        List<RankDemand> rankDemands = new RankDemandCalculator().calculate(layeredGraph);
         
         Map<String, Position> positions = new LinkedHashMap<>();
         Map<String, BoundingBox> bounds = new LinkedHashMap<>();
@@ -78,7 +81,8 @@ public class DefaultCoordinateAssigner implements LayoutAlgorithm {
                 int w = isHorizontal ? bb.height() : bb.width();
                 int h = isHorizontal ? bb.width() : bb.height();
                 
-                Position pos = GridSnapper.snap(new Position(currentX, currentY), options.getGridSize());
+                Position pos = snapForwardAlongRank(
+                        new Position(currentX, currentY), options.getGridSize());
                 positions.put(node.getId(), pos);
                 bounds.put(node.getId(), new BoundingBox(pos.x(), pos.y(), w, h));
                 
@@ -86,8 +90,11 @@ public class DefaultCoordinateAssigner implements LayoutAlgorithm {
                 maxBottomInLayer = Math.max(maxBottomInLayer, pos.y() + h);
             }
             
-            currentY = maxBottomInLayer
-                    + adaptiveLayerSpacing(layeredGraph, layerIndex, spacing.verticalSpacing());
+            int rankSpacing = layerIndex < rankDemands.size()
+                    ? spacingStrategy.computeRankSpacing(
+                            rankDemands.get(layerIndex), spacing, options)
+                    : spacing.verticalSpacing();
+            currentY = maxBottomInLayer + rankSpacing;
         }
         
         if (options.getAlignmentMode() != null) {
@@ -246,31 +253,15 @@ public class DefaultCoordinateAssigner implements LayoutAlgorithm {
         return new CoordinateAssignment(positions, bounds);
     }
 
-    private int adaptiveLayerSpacing(LayeredGraph graph, int layerIndex, int baseSpacing) {
-        if (layerIndex >= graph.getLayers().size() - 1) {
-            return baseSpacing;
-        }
-        Map<String, Integer> outgoing = new LinkedHashMap<>();
-        Map<String, Integer> incoming = new LinkedHashMap<>();
-        for (var edge : graph.getOriginalGraph().getEdges().values()) {
-            Integer sourceLayer = graph.getNodeToLayer().get(edge.getSourceNodeId());
-            Integer targetLayer = graph.getNodeToLayer().get(edge.getTargetNodeId());
-            if (sourceLayer == null || targetLayer == null) {
-                continue;
-            }
-            if (sourceLayer == layerIndex && targetLayer > layerIndex) {
-                outgoing.merge(edge.getSourceNodeId(), 1, Integer::sum);
-            }
-            if (targetLayer == layerIndex + 1 && sourceLayer < targetLayer) {
-                incoming.merge(edge.getTargetNodeId(), 1, Integer::sum);
-            }
-        }
-        int branchCount = Math.max(
-                outgoing.values().stream().mapToInt(Integer::intValue).max().orElse(0),
-                incoming.values().stream().mapToInt(Integer::intValue).max().orElse(0));
-        return branchCount > 2 ? baseSpacing + (branchCount - 1) * 25 : baseSpacing;
+    private Position snapForwardAlongRank(final Position position, final int gridSize) {
+        final Position snapped = GridSnapper.snap(position, gridSize);
+        final int remainder = Math.floorMod(position.y(), gridSize);
+        final int forwardY = remainder == 0
+                ? position.y()
+                : Math.toIntExact((long) position.y() + gridSize - remainder);
+        return new Position(snapped.x(), forwardY);
     }
-    
+
     private void repositionPorts(List<LayoutNode> ports, boolean isInput, FlowDirection flowDir, int portSpacing, 
                                  int minX, int minY, int maxX, int maxY, int midX, int midY, 
                                  Map<String, Position> positions, Map<String, BoundingBox> bounds, int gridSize) {

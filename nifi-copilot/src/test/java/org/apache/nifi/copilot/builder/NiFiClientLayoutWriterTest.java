@@ -183,6 +183,23 @@ class NiFiClientLayoutWriterTest {
     }
 
     @Test
+    void connectionEndpointAnchorsAreNotPersistedAsBends() {
+        LayoutGraph graph = emptyGraph();
+        Map<String, List<Position>> path = Map.of(
+                "conn1", List.of(
+                        new Position(50, 100),
+                        new Position(100, 150),
+                        new Position(150, 200)));
+        LayoutWriteRequest request = writeRequestWithBends(graph, Map.of(), path);
+
+        writer.write(Map.of(), request);
+
+        verify(nifi).updateConnection(eq("conn1"), argThat(update ->
+                update.get("bends").equals(List.of(Map.of(
+                        "x", 100.0, "y", 150.0)))));
+    }
+
+    @Test
     void connectionBendRollbackRegisteredBeforeUpdate() {
         LayoutGraph graph = emptyGraph();
         Map<String, List<Position>> bends = Map.of(

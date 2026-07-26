@@ -132,6 +132,8 @@ class FlowDeploymentCoordinatorActivationSuppressionTest {
         when(nifi.createProcessor(eq(PG_ID), anyString(), anyString(),
                 anyDouble(), anyDouble(), any()))
                 .thenReturn(Map.of("id", "proc-to-rollback"));
+        stubProcessorCapabilities(
+                nifi, "org.apache.nifi.processors.standard.GenerateFlowFile");
 
         LayoutDeploymentStage.LayoutExecutor executor =
                 mock(LayoutDeploymentStage.LayoutExecutor.class);
@@ -185,6 +187,26 @@ class FlowDeploymentCoordinatorActivationSuppressionTest {
                         "type", "org.apache.nifi.processors.standard.LogAttribute")));
         spec.put("connections", List.of(Map.of("from", "p1", "to", "p2")));
         return spec;
+    }
+
+    private static void stubProcessorCapabilities(
+            final NiFiClientOperations nifi, final String... processorTypes) {
+        when(nifi.listProcessorTypes()).thenReturn(java.util.Arrays.stream(processorTypes)
+                .map(type -> Map.<String, Object>of(
+                        "type", type,
+                        "bundle", Map.of("group", "g", "artifact", "a", "version", "1")))
+                .toList());
+        when(nifi.listControllerServiceTypes()).thenReturn(List.of());
+        for (String type : processorTypes) {
+            when(nifi.getProcessorDefinition("g", "a", "1", type)).thenReturn(Map.of(
+                    "type", type,
+                    "propertyDescriptors", Map.of(),
+                    "supportedRelationships", List.of(Map.of("name", "success")),
+                    "supportedSchedulingStrategies", List.of("TIMER_DRIVEN"),
+                    "supportsDynamicProperties", false,
+                    "supportsDynamicRelationships", false,
+                    "triggerSerially", false));
+        }
     }
 
     private static Map<String, Object> emptyFlowResponse() {

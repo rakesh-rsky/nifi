@@ -42,6 +42,7 @@ Open NiFi and use the Copilot panel to sign in with GitHub (or AWS for Bedrock).
 |---|---|---|
 | `GITHUB_CLIENT_ID` | _(bundled)_ | Override only when self-hosting OAuth app |
 | `NIFI_COPILOT_CLIENT_MODE` / `nifi.copilot.client.mode` | `auto` | `auto` prefers internal facade if available; `internal` requires internal facade; `external` forces NiFi REST API client |
+| `nifi.copilot.capability.cache-ttl` | `PT15M` | Positive ISO-8601 duration for target NiFi processor and controller-service capability snapshots |
 | `NIFI_BASE_URL` | from `src/main/resources/nifi.properties` (`https://localhost:8443`) | NiFi URL for external mode |
 | `NIFI_USERNAME` | _(empty)_ | NiFi username for external mode |
 | `NIFI_PASSWORD` | _(empty)_ | NiFi password for external mode |

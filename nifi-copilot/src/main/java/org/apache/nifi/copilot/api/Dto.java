@@ -3,6 +3,7 @@ package org.apache.nifi.copilot.api;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.apache.nifi.copilot.capability.ValidationIssue;
 
 public final class Dto {
     private Dto() {
@@ -35,6 +36,7 @@ public final class Dto {
         public List<String> process_groups_deleted = new ArrayList<>();
         public List<String> controller_services_deleted = new ArrayList<>();
         public List<String> parameter_contexts_deleted = new ArrayList<>();
+        public List<ValidationIssue> validation_issues = new ArrayList<>();
         public Map<String, Object> tokens_used;
     }
 

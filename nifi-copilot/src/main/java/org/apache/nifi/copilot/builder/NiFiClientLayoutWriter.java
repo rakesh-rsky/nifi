@@ -146,7 +146,10 @@ public final class NiFiClientLayoutWriter implements FlowLayoutWriter<Map<String
     private void writeConnectionBends(final LayoutResult result) {
         for (final Map.Entry<String, List<Position>> entry : result.getConnectionBendPoints().entrySet()) {
             final String connectionId = entry.getKey();
-            final List<Position> newBends = entry.getValue();
+            final List<Position> path = entry.getValue();
+            final List<Position> newBends = path.size() <= 2
+                    ? List.of()
+                    : path.subList(1, path.size() - 1);
 
             // Capture original bends from the live entity before mutating.
             final Map<String, Object> currentEntity = nifi.getConnection(connectionId);

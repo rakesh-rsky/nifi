@@ -8,6 +8,27 @@ import java.util.Map;
 import java.util.Set;
 
 public interface NiFiClientOperations {
+    default List<Map<String, Object>> listProcessorTypes() {
+        throw new CapabilityDiscoveryException("Processor capability discovery is not supported by this NiFi client");
+    }
+
+    default List<Map<String, Object>> listControllerServiceTypes() {
+        throw new CapabilityDiscoveryException("Controller service capability discovery is not supported by this NiFi client");
+    }
+
+    default Map<String, Object> getProcessorDefinition(
+            final String group, final String artifact, final String version, final String type) {
+        throw new CapabilityDiscoveryException("Processor definition discovery is not supported by this NiFi client");
+    }
+
+    default Map<String, Object> getControllerServiceDefinition(
+            final String group, final String artifact, final String version, final String type) {
+        throw new CapabilityDiscoveryException("Controller service definition discovery is not supported by this NiFi client");
+    }
+
+    default void refreshCapabilityCaches() {
+    }
+
     String getProcessGroupId(String pgId);
 
     Map<String, Object> createProcessGroup(String parentPgId, String name, double x, double y);

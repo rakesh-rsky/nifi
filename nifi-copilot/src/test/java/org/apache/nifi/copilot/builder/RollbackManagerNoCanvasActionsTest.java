@@ -158,6 +158,10 @@ class RollbackManagerNoCanvasActionsTest {
                 eq("org.apache.nifi.processors.standard.LogAttribute"),
                 anyString(), anyDouble(), anyDouble(), any()))
                 .thenThrow(new RuntimeException("creation failed"));
+        stubProcessorCapabilities(
+                nifi,
+                "org.apache.nifi.processors.standard.GenerateFlowFile",
+                "org.apache.nifi.processors.standard.LogAttribute");
 
         FlowDeploymentMetricsRegistry builderMetrics = new FlowDeploymentMetricsRegistry();
         FlowDeploymentCoordinator coordinator =
@@ -198,5 +202,25 @@ class RollbackManagerNoCanvasActionsTest {
         pgFlow.put("id", PG_ID);
         pgFlow.put("flow", flow);
         return Map.of("processGroupFlow", pgFlow);
+    }
+
+    private static void stubProcessorCapabilities(
+            final NiFiClientOperations nifi, final String... processorTypes) {
+        when(nifi.listProcessorTypes()).thenReturn(java.util.Arrays.stream(processorTypes)
+                .map(type -> Map.<String, Object>of(
+                        "type", type,
+                        "bundle", Map.of("group", "g", "artifact", "a", "version", "1")))
+                .toList());
+        when(nifi.listControllerServiceTypes()).thenReturn(List.of());
+        for (String type : processorTypes) {
+            when(nifi.getProcessorDefinition("g", "a", "1", type)).thenReturn(Map.of(
+                    "type", type,
+                    "propertyDescriptors", Map.of(),
+                    "supportedRelationships", List.of(Map.of("name", "success")),
+                    "supportedSchedulingStrategies", List.of("TIMER_DRIVEN"),
+                    "supportsDynamicProperties", false,
+                    "supportsDynamicRelationships", false,
+                    "triggerSerially", false));
+        }
     }
 }

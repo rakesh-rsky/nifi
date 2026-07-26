@@ -2,20 +2,37 @@ package org.apache.nifi.copilot.api;
 
 import static org.apache.nifi.copilot.api.Dto.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.apache.nifi.copilot.auth.AwsAuthManager;
 import org.apache.nifi.copilot.builder.FlowBuilder;
 import org.apache.nifi.copilot.auth.GitHubAuthManager;
+import org.apache.nifi.copilot.capability.CapabilityPromptRenderer;
+import org.apache.nifi.copilot.capability.CapabilityGraph;
+import org.apache.nifi.copilot.capability.CapabilityMetricsRegistry;
+import org.apache.nifi.copilot.capability.CapabilityRegistry;
+import org.apache.nifi.copilot.capability.CapabilityRegistryManager;
+import org.apache.nifi.copilot.capability.FlowSpecificationValidationException;
+import org.apache.nifi.copilot.capability.RepairContextExpander;
+import org.apache.nifi.copilot.capability.RepairHint;
+import org.apache.nifi.copilot.capability.RepairHintDeriver;
+import org.apache.nifi.copilot.capability.ValidatedFlowPlan;
+import org.apache.nifi.copilot.capability.ValidationIssue;
 import org.apache.nifi.copilot.llm.LlmClient;
+import org.apache.nifi.copilot.service.CapabilityDiscoveryException;
 import org.apache.nifi.copilot.service.NiFiClientOperations;
 import org.apache.nifi.copilot.store.SessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -30,6 +47,39 @@ public class CopilotController {
     private final LlmClient llmClient;
     private final FlowBuilder flowBuilder;
     private final SessionStore sessionStore;
+    private final CapabilityRegistryManager capabilityRegistryManager;
+    private final CapabilityPromptRenderer capabilityPromptRenderer;
+    private final RepairHintDeriver repairHintDeriver;
+    private final RepairContextExpander repairContextExpander;
+    private final CapabilityMetricsRegistry capabilityMetrics;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Autowired
+    public CopilotController(
+            final GitHubAuthManager githubAuthManager,
+            final AwsAuthManager awsAuthManager,
+            final NiFiClientOperations nifiClient,
+            final LlmClient llmClient,
+            final FlowBuilder flowBuilder,
+            final SessionStore sessionStore,
+            final CapabilityRegistryManager capabilityRegistryManager,
+            final CapabilityPromptRenderer capabilityPromptRenderer,
+            final RepairHintDeriver repairHintDeriver,
+            final RepairContextExpander repairContextExpander,
+            final CapabilityMetricsRegistry capabilityMetrics) {
+        this.githubAuthManager = githubAuthManager;
+        this.awsAuthManager = awsAuthManager;
+        this.nifiClient = nifiClient;
+        this.llmClient = llmClient;
+        this.flowBuilder = flowBuilder;
+        this.sessionStore = sessionStore;
+        this.capabilityRegistryManager = capabilityRegistryManager;
+        this.capabilityPromptRenderer = capabilityPromptRenderer;
+        this.repairHintDeriver = repairHintDeriver;
+        this.repairContextExpander = repairContextExpander;
+        this.capabilityMetrics = capabilityMetrics;
+        this.githubAuthManager.validateSavedToken();
+    }
 
     public CopilotController(
             final GitHubAuthManager githubAuthManager,
@@ -38,13 +88,10 @@ public class CopilotController {
             final LlmClient llmClient,
             final FlowBuilder flowBuilder,
             final SessionStore sessionStore) {
-        this.githubAuthManager = githubAuthManager;
-        this.awsAuthManager = awsAuthManager;
-        this.nifiClient = nifiClient;
-        this.llmClient = llmClient;
-        this.flowBuilder = flowBuilder;
-        this.sessionStore = sessionStore;
-        this.githubAuthManager.validateSavedToken();
+        this(githubAuthManager, awsAuthManager, nifiClient, llmClient, flowBuilder, sessionStore,
+                new CapabilityRegistryManager(), new CapabilityPromptRenderer(),
+                new RepairHintDeriver(), new RepairContextExpander(),
+                new CapabilityMetricsRegistry());
     }
 
     @GetMapping("/api/session/{processGroupId}")
@@ -197,23 +244,41 @@ public class CopilotController {
             }
         }
 
-        final Map<String, Object> spec;
-        if ("aws".equalsIgnoreCase(req.provider)) {
-            if (!awsAuthManager.isAuthenticated()) {
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated with AWS Bedrock.");
-            }
-            spec = llmClient.generateFlowSpecBedrock(req.message, history,
-                    awsAuthManager.getBedrockCredentials(), existing, req.model,
-                    existingCs, existingGroups, existingConnections);
-        } else {
-            if (!githubAuthManager.isAuthenticated()) {
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated with GitHub.");
-            }
-            spec = llmClient.generateFlowSpec(req.message, history,
-                    githubAuthManager.getGitHubToken(), existing, req.model,
-                    existingCs, existingGroups, existingConnections);
+        final String capabilityContext;
+        final CapabilityGraph capabilityGraph;
+        try {
+            final CapabilityRegistry.CapabilitySet capabilities =
+                    capabilityRegistryManager.capabilitySet(nifiClient);
+            capabilityGraph = capabilities.graph();
+            capabilityContext = capabilityPromptRenderer.renderFromGraph(
+                    req.message, capabilityGraph);
+        } catch (CapabilityDiscoveryException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "NiFi capability discovery unavailable; generation was not attempted: " + e.getMessage(),
+                    e);
         }
 
+        final ValidatedFlowPlan plan;
+        Map<String, Object> generatedSpec = null;
+        try {
+            final PreparedGeneration prepared = generateAndPrepare(req, history, existing, existingCs,
+                    existingGroups, existingConnections, capabilityContext, capabilityGraph);
+            if (prepared.plan() == null) {
+                return validationFailure(prepared.specification(), prepared.issues());
+            }
+            generatedSpec = prepared.specification();
+            plan = prepared.plan();
+        } catch (CapabilityDiscoveryException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY,
+                    "NiFi capability validation unavailable; no canvas changes were made: " + e.getMessage(),
+                    e);
+        } catch (IllegalArgumentException | ClassCastException e) {
+            return validationFailure(generatedSpec, List.of(new ValidationIssue(
+                    "", "specification", e.getMessage(), "Return a structurally valid flow specification")));
+        }
+        final Map<String, Object> spec = plan.specification();
         String explanation = String.valueOf(spec.getOrDefault("explanation", "Done!"));
         final List<Map<String, Object>> deletions = (List<Map<String, Object>>) spec.getOrDefault("deletions", List.of());
         final List<String> deletedProcessorNames = new ArrayList<>();
@@ -273,41 +338,11 @@ public class CopilotController {
             }
         }
 
-        final List<Map<String, Object>> csActions = (List<Map<String, Object>>) spec.getOrDefault("cs_actions", List.of());
-        if (!csActions.isEmpty()) {
-            final Map<String, Map<String, Object>> csNameMap = new HashMap<>();
-            for (Map<String, Object> cs : existingCs) {
-                csNameMap.put(String.valueOf(cs.getOrDefault("name", "")).toLowerCase(), cs);
-            }
-            final List<String> csResults = new ArrayList<>();
-            for (Map<String, Object> action : csActions) {
-                final String csName = String.valueOf(action.getOrDefault("name", ""));
-                final String act = String.valueOf(action.getOrDefault("action", "")).toLowerCase();
-                final Map<String, Object> csInfo = csNameMap.get(csName.toLowerCase());
-                if (csInfo == null) {
-                    csResults.add("⚠️ Controller service '" + csName + "' not found on canvas.");
-                    continue;
-                }
-                final String csId = String.valueOf(csInfo.get("nifi_id"));
-                try {
-                    if ("enable".equals(act)) {
-                        nifiClient.enableControllerService(csId);
-                        csResults.add("✅ Enabled '" + csName + "'");
-                    } else if ("disable".equals(act)) {
-                        nifiClient.disableControllerService(csId);
-                        csResults.add("✅ Disabled '" + csName + "'");
-                    }
-                } catch (Exception e) {
-                    csResults.add("⚠️ Could not " + act + " '" + csName + "': " + e.getMessage());
-                }
-            }
-            if (!csResults.isEmpty()) {
-                explanation += "\n\n" + String.join("\n", csResults);
-            }
-        }
-
+        final List<Map<String, Object>> csActions =
+                (List<Map<String, Object>>) spec.getOrDefault("cs_actions", List.of());
         List<Map<String, Object>> createdProcessors = List.of();
         int connectionsCreated = 0;
+        boolean deploymentSucceeded = false;
         final List<Map<String, Object>> processorsSpec = (List<Map<String, Object>>) spec.getOrDefault("processors", List.of());
         final Map<String, String> existingIdMap = new HashMap<>();
         for (Map<String, Object> p : existing) {
@@ -319,9 +354,10 @@ public class CopilotController {
         }
         try {
             final FlowBuilder.BuildResult res = flowBuilder.buildFlow(
-                    spec, req.process_group_id, nifiClient, existingIdMap, existing.size(), false, true);
+                    plan, req.process_group_id, nifiClient, existingIdMap, existing.size(), false, true);
             createdProcessors = res.createdProcessors();
             connectionsCreated = res.connectionsCreated();
+            deploymentSucceeded = true;
             if (!createdProcessors.isEmpty()) {
                 explanation += "\n\n✅ Created " + createdProcessors.size() + " processor(s), "
                         + connectionsCreated + " connection(s) on the canvas.";
@@ -331,6 +367,14 @@ public class CopilotController {
         } catch (Exception e) {
             final String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             explanation += "\n\n⚠️ Could not apply changes on the canvas: " + detail;
+        }
+        if (deploymentSucceeded && !csActions.isEmpty()) {
+            final List<String> csResults = applyControllerServiceActions(
+                    csActions, req.process_group_id,
+                    (List<Map<String, Object>>) spec.getOrDefault("controller_services", List.of()));
+            if (!csResults.isEmpty()) {
+                explanation += "\n\n" + String.join("\n", csResults);
+            }
         }
 
         final ChatResponse response = new ChatResponse();
@@ -348,6 +392,217 @@ public class CopilotController {
                     String.valueOf(p.getOrDefault("spec_id", "")),
                     String.valueOf(p.getOrDefault("name", "")),
                     String.valueOf(p.getOrDefault("type", ""))));
+        }
+        return response;
+    }
+
+    private List<String> applyControllerServiceActions(
+            final List<Map<String, Object>> actions,
+            final String processGroupId,
+            final List<Map<String, Object>> declaredServices) {
+        final Map<String, String> serviceIdsByName = new HashMap<>();
+        final List<Map<String, Object>> services;
+        try {
+            services = nifiClient.listControllerServices(processGroupId);
+        } catch (RuntimeException e) {
+            return List.of("⚠️ Could not refresh controller services after deployment: " + e.getMessage());
+        }
+        for (Map<String, Object> service : services) {
+            final Map<String, Object> component = nestedMap(service, "component");
+            final String name = String.valueOf(component.getOrDefault(
+                    "name", service.getOrDefault("name", "")));
+            final String id = String.valueOf(component.getOrDefault(
+                    "id", service.getOrDefault("id", "")));
+            if (!name.isBlank() && !id.isBlank()) {
+                serviceIdsByName.put(name.toLowerCase(), id);
+            }
+        }
+        final Set<String> declaredNames = new HashSet<>();
+        for (Map<String, Object> service : declaredServices) {
+            declaredNames.add(String.valueOf(service.getOrDefault("name", "")).toLowerCase());
+        }
+
+        final List<String> results = new ArrayList<>();
+        for (Map<String, Object> action : actions) {
+            final String serviceName = String.valueOf(action.getOrDefault("name", ""));
+            final String normalizedName = serviceName.toLowerCase();
+            final String actionName = String.valueOf(action.getOrDefault("action", "")).toLowerCase();
+            final String serviceId = serviceIdsByName.get(normalizedName);
+            if (serviceId == null) {
+                if (declaredNames.contains(normalizedName)) {
+                    results.add("⚠️ Controller service '" + serviceName
+                            + "' was declared but not found after deployment.");
+                } else {
+                    logger.warn("Ignoring controller service action '{}' for undeclared service '{}'",
+                            actionName, serviceName);
+                }
+                continue;
+            }
+            if ("enable".equals(actionName) && declaredNames.contains(normalizedName)) {
+                results.add("✅ Enabled '" + serviceName + "'");
+                continue;
+            }
+            try {
+                if ("enable".equals(actionName)) {
+                    nifiClient.enableControllerService(serviceId);
+                    results.add("✅ Enabled '" + serviceName + "'");
+                } else if ("disable".equals(actionName)) {
+                    nifiClient.disableControllerService(serviceId);
+                    results.add("✅ Disabled '" + serviceName + "'");
+                }
+            } catch (Exception e) {
+                results.add("⚠️ Could not " + actionName + " '" + serviceName + "': " + e.getMessage());
+            }
+        }
+        return results;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> nestedMap(final Map<String, Object> source, final String key) {
+        final Object value = source.get(key);
+        return value instanceof Map<?, ?> ? (Map<String, Object>) value : Map.of();
+    }
+
+    private PreparedGeneration generateAndPrepare(
+            final ChatRequest req,
+            final List<Map<String, String>> history,
+            final List<Map<String, Object>> existing,
+            final List<Map<String, Object>> existingCs,
+            final List<Map<String, Object>> existingGroups,
+            final List<Map<String, Object>> existingConnections,
+            final String capabilityContext,
+            final CapabilityGraph capabilityGraph) {
+        final Map<String, Object> generated = generateSpecification(
+                req, req.message, history, existing, existingCs, existingGroups,
+                existingConnections, capabilityContext);
+        try {
+            final ValidatedFlowPlan plan = flowBuilder.prepareFlow(generated, nifiClient, true);
+            capabilityMetrics.observeFirstPass(true, List.of());
+            return new PreparedGeneration(generated, plan, List.of());
+        } catch (FlowSpecificationValidationException firstFailure) {
+            capabilityMetrics.observeFirstPass(false, firstFailure.getReport().issues());
+            capabilityMetrics.observeRepairAttempt();
+            final List<RepairHint> repairHints =
+                    repairHintDeriver.derive(firstFailure.getReport(), capabilityGraph);
+            final String repairCapabilityContext = repairContextExpander.expand(
+                    req.message, capabilityGraph, repairHints, generated);
+            final String repairMessage = repairMessage(
+                    req.message, generated, firstFailure.getReport().issues());
+            final Map<String, Object> repaired = generateSpecification(
+                    req, repairMessage, List.of(), existing, existingCs, existingGroups,
+                    existingConnections, repairCapabilityContext);
+            final Map<?, ?> repairUsage = repaired.get("_token_usage") instanceof Map<?, ?> value
+                    ? value
+                    : Map.of();
+            capabilityMetrics.observeRepairTokens(
+                    intValue(repairUsage.get("input")),
+                    intValue(repairUsage.get("output")));
+            final Map<String, Object> repairedWithUsage = combineTokenUsage(generated, repaired);
+            try {
+                final ValidatedFlowPlan plan =
+                        flowBuilder.prepareFlow(repairedWithUsage, nifiClient, true);
+                capabilityMetrics.observeRepairResult(true, List.of());
+                return new PreparedGeneration(repairedWithUsage, plan, List.of());
+            } catch (FlowSpecificationValidationException finalFailure) {
+                capabilityMetrics.observeRepairResult(
+                        false, finalFailure.getReport().issues());
+                return new PreparedGeneration(
+                        repairedWithUsage, null, finalFailure.getReport().issues());
+            }
+        }
+    }
+
+    private Map<String, Object> generateSpecification(
+            final ChatRequest req,
+            final String message,
+            final List<Map<String, String>> history,
+            final List<Map<String, Object>> existing,
+            final List<Map<String, Object>> existingCs,
+            final List<Map<String, Object>> existingGroups,
+            final List<Map<String, Object>> existingConnections,
+            final String capabilityContext) {
+        if ("aws".equalsIgnoreCase(req.provider)) {
+            if (!awsAuthManager.isAuthenticated()) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated with AWS Bedrock.");
+            }
+            return llmClient.generateFlowSpecBedrock(message, history,
+                    awsAuthManager.getBedrockCredentials(), existing, req.model,
+                    existingCs, existingGroups, existingConnections, capabilityContext);
+        }
+        if (!githubAuthManager.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated with GitHub.");
+        }
+        return llmClient.generateFlowSpec(message, history,
+                githubAuthManager.getGitHubToken(), existing, req.model,
+                existingCs, existingGroups, existingConnections, capabilityContext);
+    }
+
+    private String repairMessage(
+            final String originalRequest,
+            final Map<String, Object> rejected,
+            final List<ValidationIssue> issues) {
+        final Map<String, Object> rejectedWithoutUsage = new LinkedHashMap<>(rejected);
+        rejectedWithoutUsage.remove("_token_usage");
+        return """
+                Correct the complete NiFi flow specification below. Return one complete JSON object only.
+                Preserve the original intent and topology, but fix every validation issue using exact TARGET NIFI
+                CAPABILITIES names and values. Supply every required property with no default. Relationship names
+                are case-sensitive and must exactly match the source processor.
+
+                ORIGINAL REQUEST:
+                %s
+
+                VALIDATION ISSUES:
+                %s
+
+                REJECTED SPECIFICATION:
+                %s
+                """.formatted(
+                originalRequest,
+                objectMapper.valueToTree(issues),
+                objectMapper.valueToTree(rejectedWithoutUsage));
+    }
+
+    private Map<String, Object> combineTokenUsage(
+            final Map<String, Object> first,
+            final Map<String, Object> second) {
+        final Map<String, Object> combined = new LinkedHashMap<>(second);
+        final Map<?, ?> firstUsage = first.get("_token_usage") instanceof Map<?, ?> value ? value : Map.of();
+        final Map<?, ?> secondUsage = second.get("_token_usage") instanceof Map<?, ?> value ? value : Map.of();
+        if (firstUsage.isEmpty() && secondUsage.isEmpty()) {
+            return combined;
+        }
+        combined.put("_token_usage", Map.of(
+                "input", intValue(firstUsage.get("input")) + intValue(secondUsage.get("input")),
+                "output", intValue(firstUsage.get("output")) + intValue(secondUsage.get("output")),
+                "total", intValue(firstUsage.get("total")) + intValue(secondUsage.get("total"))));
+        return combined;
+    }
+
+    private record PreparedGeneration(
+            Map<String, Object> specification,
+            ValidatedFlowPlan plan,
+            List<ValidationIssue> issues) {
+    }
+
+    private ChatResponse validationFailure(
+            final Map<String, Object> generatedSpec,
+            final List<ValidationIssue> issues) {
+        final ChatResponse response = new ChatResponse();
+        response.validation_issues = issues.stream().sorted().toList();
+        final StringBuilder explanation = new StringBuilder(
+                "The generated flow was rejected before any NiFi changes were made.");
+        for (ValidationIssue issue : response.validation_issues) {
+            explanation.append("\n- ").append(issue.componentId().isBlank() ? "<flow>" : issue.componentId())
+                    .append(" ").append(issue.path()).append(": ").append(issue.reason());
+            if (!issue.suggestedFix().isBlank()) {
+                explanation.append(" Fix: ").append(issue.suggestedFix());
+            }
+        }
+        response.reply = explanation.toString();
+        final Object usage = generatedSpec == null ? null : generatedSpec.get("_token_usage");
+        if (usage instanceof Map<?, ?> map) {
+            response.tokens_used = (Map<String, Object>) map;
         }
         return response;
     }

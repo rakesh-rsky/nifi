@@ -7,7 +7,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -51,7 +50,7 @@ Design and AUTO-CONFIGURE data flows. Always return ONE valid JSON object — no
   "controller_services": [{"id": "cs1", "type": "<FQN>", "name": "...", "properties": {}}],
   "processors": [{"id": "proc1", "type": "<FQN>", "name": "...", "config": {}}],
   "funnels": [{"id": "funnel1"}],
-  "connections": [{"from": "proc1", "to": "proc2", "relationships": ["success"], "allow_self_loop": false}],
+  "connections": [{"from": "proc1", "to": "proc2", "relationships": ["<exact discovered relationship>"], "allow_self_loop": false}],
   "deletions": [{"type": "processor|process_group|controller_service|parameter_context", "spec_id": "...", "name": "..."}],
   "cs_actions": [{"name": "<exact service name>", "action": "enable|disable"}]
 }
@@ -76,7 +75,7 @@ Do not include x/y on processors. The backend lays out the connection graph dete
 - Omit terminal and unused relationships from connections; the backend auto-terminates them.
 - LogAttribute and LogMessage processors are terminal sinks. Never create outgoing connections from them.
 - Parallel workers that share result logging must converge into ONE shared LogMessage or LogAttribute.
-  For each worker, use one connection selecting all requested success and failure relationships.
+  For each worker, use connections selecting only exact relationship names from TARGET NIFI CAPABILITIES.
   Never create one logger per worker or chain result loggers.
 - Do not share a terminal logger between sequential or non-adjacent pipeline stages when its connection
   would cross intervening processors. Create a stage-specific terminal logger for each distant stage.
@@ -86,7 +85,11 @@ Do not include x/y on processors. The backend lays out the connection graph dete
   already exists in CANVAS CONTEXT, reuse its exact spec_id for one outcome and create only one new logger.
 - When the user requests N-way load distribution, use
   org.apache.nifi.processors.standard.DistributeLoad with "Number of Relationships" set to N and
-  "Distribution Strategy" set to "round robin". Connect relationships "1" through "N" to the N workers.
+  "Distribution Strategy" set to "round robin". Create exactly N distinct worker processor entries
+  and connect relationships "1" through "N" one-to-one to those workers. Connecting all N
+  relationships to one worker is invalid and does not provide parallel load balancing.
+- For InvokeHTTP, use exact "Response" for successful response logging and exact "Failure", "No Retry",
+  and "Retry" for failure logging when those relationships are listed. Never substitute generic "success".
 - Create a self-loop only when the user explicitly requests feedback/retry to the same processor,
   and set "allow_self_loop": true on that connection.
 
@@ -99,6 +102,15 @@ note any controller services or parameter contexts and which processors use them
 - Dynamic properties (XPath destinations, UpdateAttribute attrs, RouteOnAttribute routes): attribute name as key
 - Controller service ref: set value to service spec id (e.g. "cs1")
 - Parameter ref: #{param_name}
+- Never invent processor types, controller-service types, properties, relationships, or scheduling strategies.
+- Supply every discovered required property whose default is <none>. Use a clear parameter placeholder when
+  the user did not provide a concrete value.
+- Controller services are allowed only when an actual discovered property descriptor requires their API.
+- Omit a component or property rather than guessing. Prefer the simplest valid flow when unsure.
+- ConsumeMQTT uses its direct Broker URI, Topic, QoS, and credential properties; never add a generic MQTT
+  connection service unless the discovered target descriptor explicitly requires one.
+- MergeRecord must use discovered record reader/writer service properties and produce JSON arrays for JSON batching.
+- Use DistributeLoad for parallel HTTP workers rather than duplicating upstream routes.
 
 === CANVAS CONTEXT ===
 IF the user message starts with [CANVAS CONTEXT]: those processors, connections, process groups, and controller services exist — do NOT recreate them.
@@ -146,9 +158,23 @@ Set processors:[] unless also creating new ones.
             final List<Map<String, Object>> existingControllerServices,
             final List<Map<String, Object>> existingProcessGroups,
             final List<Map<String, Object>> existingConnections) {
+        return generateFlowSpec(userMessage, history, githubToken, existingProcessors, model,
+                existingControllerServices, existingProcessGroups, existingConnections, "");
+    }
+
+    public Map<String, Object> generateFlowSpec(
+            final String userMessage,
+            final List<Map<String, String>> history,
+            final String githubToken,
+            final List<Map<String, Object>> existingProcessors,
+            final String model,
+            final List<Map<String, Object>> existingControllerServices,
+            final List<Map<String, Object>> existingProcessGroups,
+            final List<Map<String, Object>> existingConnections,
+            final String capabilityContext) {
         final String selectedModel = (model == null || model.isBlank()) ? DEFAULT_MODEL : model;
         final List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
+        messages.add(Map.of("role", "system", "content", systemPrompt(capabilityContext)));
         final int start = Math.max(0, history.size() - 6);
         for (int i = start; i < history.size(); i++) {
             messages.add(new HashMap<>(history.get(i)));
@@ -234,6 +260,20 @@ Set processors:[] unless also creating new ones.
             final List<Map<String, Object>> existingControllerServices,
             final List<Map<String, Object>> existingProcessGroups,
             final List<Map<String, Object>> existingConnections) {
+        return generateFlowSpecBedrock(userMessage, history, awsCreds, existingProcessors, model,
+                existingControllerServices, existingProcessGroups, existingConnections, "");
+    }
+
+    public Map<String, Object> generateFlowSpecBedrock(
+            final String userMessage,
+            final List<Map<String, String>> history,
+            final Map<String, String> awsCreds,
+            final List<Map<String, Object>> existingProcessors,
+            final String model,
+            final List<Map<String, Object>> existingControllerServices,
+            final List<Map<String, Object>> existingProcessGroups,
+            final List<Map<String, Object>> existingConnections,
+            final String capabilityContext) {
         final List<Map<String, Object>> messages = new ArrayList<>();
         final int start = Math.max(0, history.size() - 6);
         for (int i = start; i < history.size(); i++) {
@@ -245,7 +285,7 @@ Set processors:[] unless also creating new ones.
         final Map<String, Object> body = new HashMap<>();
         body.put("anthropic_version", "bedrock-2023-05-31");
         body.put("max_tokens", 4096);
-        body.put("system", SYSTEM_PROMPT);
+        body.put("system", systemPrompt(capabilityContext));
         body.put("messages", messages);
         body.put("temperature", 0.2);
         final String modelId = (model == null || model.isBlank()) ? DEFAULT_BEDROCK_MODEL : model;
@@ -337,6 +377,13 @@ Set processors:[] unless also creating new ones.
         return sb.toString();
     }
 
+    String systemPrompt(final String capabilityContext) {
+        if (capabilityContext == null || capabilityContext.isBlank()) {
+            return SYSTEM_PROMPT;
+        }
+        return SYSTEM_PROMPT + "\n\n" + capabilityContext;
+    }
+
     private Map<String, Object> extractJson(String text) {
         text = text.trim();
         text = FENCE_START.matcher(text).replaceFirst("");
@@ -374,218 +421,57 @@ Set processors:[] unless also creating new ones.
             specification.put("processors", normalizedProcessors);
         }
 
-        final Object connectionsValue = splitSequentialTerminalFanIn(
-                normalizedProcessors, terminalLoggerIds, specification.get("connections"));
-        specification.put("connections", connectionsValue);
-        final String sharedLoggerId = sharedLoggerId(
-                normalizedProcessors, terminalLoggerIds, connectionsValue);
-        if (sharedLoggerId != null) {
-            normalizedProcessors.removeIf(processor -> terminalLoggerIds.contains(String.valueOf(processor.get("id")))
-                    && !sharedLoggerId.equals(String.valueOf(processor.get("id"))));
-            normalizedProcessors.stream()
-                    .filter(processor -> sharedLoggerId.equals(String.valueOf(processor.get("id"))))
-                    .findFirst()
-                    .ifPresent(processor -> processor.put("name", "Log API Results"));
-        }
-
+        // Parse connections into a mutable list for the normalizer, preserving non-map values
+        final List<Map<String, Object>> normalizedConnections = new ArrayList<>();
+        final List<Object> otherConnectionValues = new ArrayList<>();
+        final Object connectionsValue = specification.get("connections");
         if (connectionsValue instanceof List<?> connections) {
-            final Map<String, Map<String, Object>> normalizedConnections = new LinkedHashMap<>();
             for (Object connectionValue : connections) {
                 if (connectionValue instanceof Map<?, ?> connection) {
-                    final Map<String, Object> normalizedConnection = copyStringMap(connection);
-                    final Object source = normalizedConnection.get("from");
-                    Object destination = normalizedConnection.get("to");
-                    if (source != null && source.equals(destination)
-                            && !Boolean.TRUE.equals(normalizedConnection.get("allow_self_loop"))) {
-                        logger.warn("Removed unintended generated self-loop for component {}", source);
-                        continue;
-                    }
-                    if (terminalLoggerIds.contains(String.valueOf(source))
-                            && !Boolean.TRUE.equals(normalizedConnection.get("allow_terminal_output"))) {
-                        logger.warn("Removed unintended outgoing connection from terminal logger {}", source);
-                        continue;
-                    }
-                    if (sharedLoggerId != null && terminalLoggerIds.contains(String.valueOf(destination))) {
-                        destination = sharedLoggerId;
-                        normalizedConnection.put("to", sharedLoggerId);
-                    }
-                    final String key = String.valueOf(source) + '\u0000' + destination;
-                    final Map<String, Object> existing = normalizedConnections.get(key);
-                    if (existing == null) {
-                        normalizedConnections.put(key, normalizedConnection);
-                    } else {
-                        existing.put("relationships", mergedRelationships(
-                                existing.get("relationships"), normalizedConnection.get("relationships")));
-                    }
+                    normalizedConnections.add(copyStringMap(connection));
                 } else {
-                    normalizedConnections.put("raw-" + normalizedConnections.size(),
-                            Map.of("value", connectionValue));
+                    otherConnectionValues.add(connectionValue);
                 }
             }
-            specification.put("connections", new ArrayList<>(normalizedConnections.values()));
         }
-        return specification;
-    }
 
-    private Object splitSequentialTerminalFanIn(
-            final List<Map<String, Object>> processors,
-            final Set<String> loggerIds,
-            final Object connectionsValue) {
-        if (!(connectionsValue instanceof List<?> connections) || loggerIds.isEmpty()) {
-            return connectionsValue;
-        }
-        final List<Object> normalizedValues = new ArrayList<>();
-        final List<Map<String, Object>> normalizedConnections = new ArrayList<>();
-        for (Object connectionValue : connections) {
-            if (connectionValue instanceof Map<?, ?> connection) {
-                final Map<String, Object> normalizedConnection = copyStringMap(connection);
-                normalizedConnections.add(normalizedConnection);
-                normalizedValues.add(normalizedConnection);
+        new ParallelWorkerNormalizer().normalize(normalizedProcessors, normalizedConnections);
+
+        // Delegate terminal-logger partitioning to the focused helper
+        new TerminalLoggerNormalizer().normalize(
+                normalizedProcessors, terminalLoggerIds, normalizedConnections);
+
+        // Final pass: remove invalid self-loops and terminal outgoing edges; deduplicate by key
+        final Map<String, Map<String, Object>> dedupMap = new LinkedHashMap<>();
+        for (final Map<String, Object> conn : normalizedConnections) {
+            final Object source = conn.get("from");
+            final Object destination = conn.get("to");
+            if (source != null && source.equals(destination)
+                    && !Boolean.TRUE.equals(conn.get("allow_self_loop"))) {
+                logger.warn("Removed unintended generated self-loop for component {}", source);
+                continue;
+            }
+            if (terminalLoggerIds.contains(String.valueOf(source))
+                    && !Boolean.TRUE.equals(conn.get("allow_terminal_output"))) {
+                logger.warn("Removed unintended outgoing connection from terminal logger {}", source);
+                continue;
+            }
+            final String key = String.valueOf(source) + '\u0000' + destination;
+            final Map<String, Object> existing = dedupMap.get(key);
+            if (existing == null) {
+                dedupMap.put(key, conn);
             } else {
-                normalizedValues.add(connectionValue);
+                existing.put("relationships", mergedRelationships(
+                        existing.get("relationships"), conn.get("relationships")));
             }
         }
-        final Map<String, Set<String>> outgoing = outgoingBySource(normalizedConnections);
-        final Map<String, Map<String, Object>> processorsById = new HashMap<>();
-        processors.forEach(processor ->
-                processorsById.put(String.valueOf(processor.get("id")), processor));
-        final Set<String> usedIds = new HashSet<>(processorsById.keySet());
 
-        for (String loggerId : List.copyOf(loggerIds)) {
-            final List<String> sources = normalizedConnections.stream()
-                    .filter(connection -> loggerId.equals(String.valueOf(connection.get("to"))))
-                    .filter(connection -> !loggerId.equals(String.valueOf(connection.get("from"))))
-                    .map(connection -> String.valueOf(connection.get("from")))
-                    .distinct()
-                    .toList();
-            if (sources.size() < 2 || !containsSequentialSources(sources, outgoing)) {
-                continue;
-            }
-            final Map<String, Object> loggerProcessor = processorsById.get(loggerId);
-            if (loggerProcessor == null) {
-                continue;
-            }
-            loggerProcessor.put("preserve_separate_terminal", true);
-            for (int sourceIndex = 1; sourceIndex < sources.size(); sourceIndex++) {
-                final String sourceId = sources.get(sourceIndex);
-                final String cloneId = uniqueLoggerId(loggerId, sourceIndex + 1, usedIds);
-                final Map<String, Object> clone = new LinkedHashMap<>(loggerProcessor);
-                clone.put("id", cloneId);
-                clone.put("name", stageLoggerName(loggerProcessor, processorsById.get(sourceId)));
-                processors.add(clone);
-                processorsById.put(cloneId, clone);
-                loggerIds.add(cloneId);
-                normalizedConnections.stream()
-                        .filter(connection -> sourceId.equals(String.valueOf(connection.get("from")))
-                                && loggerId.equals(String.valueOf(connection.get("to"))))
-                        .forEach(connection -> connection.put("to", cloneId));
-            }
-            logger.warn("Split terminal logger {} across {} sequential pipeline stages",
-                    loggerId, sources.size());
+        final List<Object> resultConnections = new ArrayList<>(dedupMap.values());
+        for (final Object raw : otherConnectionValues) {
+            resultConnections.add(Map.of("value", raw));
         }
-        return normalizedValues;
-    }
-
-    private Map<String, Set<String>> outgoingBySource(
-            final List<Map<String, Object>> connections) {
-        final Map<String, Set<String>> outgoing = new HashMap<>();
-        for (Map<String, Object> connection : connections) {
-            final Object source = connection.get("from");
-            final Object destination = connection.get("to");
-            if (source != null && destination != null) {
-                outgoing.computeIfAbsent(String.valueOf(source), ignored -> new HashSet<>())
-                        .add(String.valueOf(destination));
-            }
-        }
-        return outgoing;
-    }
-
-    private boolean containsSequentialSources(
-            final List<String> sources,
-            final Map<String, Set<String>> outgoing) {
-        for (int left = 0; left < sources.size(); left++) {
-            for (int right = left + 1; right < sources.size(); right++) {
-                if (isReachable(sources.get(left), sources.get(right), outgoing)
-                        || isReachable(sources.get(right), sources.get(left), outgoing)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean isReachable(
-            final String source,
-            final String destination,
-            final Map<String, Set<String>> outgoing) {
-        final ArrayDeque<String> pending = new ArrayDeque<>();
-        final Set<String> visited = new HashSet<>();
-        pending.add(source);
-        while (!pending.isEmpty()) {
-            final String current = pending.removeFirst();
-            if (!visited.add(current)) {
-                continue;
-            }
-            for (String next : outgoing.getOrDefault(current, Set.of())) {
-                if (destination.equals(next)) {
-                    return true;
-                }
-                pending.addLast(next);
-            }
-        }
-        return false;
-    }
-
-    private String uniqueLoggerId(
-            final String loggerId,
-            final int stageNumber,
-            final Set<String> usedIds) {
-        String candidate = loggerId + "-stage-" + stageNumber;
-        int suffix = stageNumber;
-        while (!usedIds.add(candidate)) {
-            candidate = loggerId + "-stage-" + ++suffix;
-        }
-        return candidate;
-    }
-
-    private String stageLoggerName(
-            final Map<String, Object> loggerProcessor,
-            final Map<String, Object> sourceProcessor) {
-        final String loggerName = String.valueOf(
-                loggerProcessor.getOrDefault("name", "Log Failure"));
-        if (sourceProcessor == null) {
-            return loggerName + " - Stage";
-        }
-        final String sourceName = String.valueOf(
-                sourceProcessor.getOrDefault("name", sourceProcessor.getOrDefault("id", "Stage")));
-        return loggerName + " - " + sourceName;
-    }
-
-    private String sharedLoggerId(final List<Map<String, Object>> processors,
-                                  final Set<String> loggerIds,
-                                  final Object connectionsValue) {
-        if (loggerIds.size() < 2 || processors.stream()
-                .filter(processor -> loggerIds.contains(String.valueOf(processor.get("id"))))
-                .anyMatch(processor -> Boolean.TRUE.equals(processor.get("preserve_separate_terminal")))) {
-            return null;
-        }
-        final Set<String> loggerSources = new HashSet<>();
-        if (connectionsValue instanceof List<?> connections) {
-            for (Object connectionValue : connections) {
-                if (connectionValue instanceof Map<?, ?> connection
-                        && loggerIds.contains(String.valueOf(connection.get("to")))) {
-                    loggerSources.add(String.valueOf(connection.get("from")));
-                }
-            }
-        }
-        if (loggerSources.size() < 3) {
-            return null;
-        }
-        return processors.stream()
-                .map(processor -> String.valueOf(processor.get("id")))
-                .filter(loggerIds::contains)
-                .findFirst()
-                .orElse(null);
+        specification.put("connections", resultConnections);
+        return specification;
     }
 
     private List<String> mergedRelationships(final Object first, final Object second) {

@@ -117,7 +117,8 @@ final class LocalPreflightValidator {
             }
         }
         for (String key : List.of("controller_services", "processors", "input_ports", "output_ports",
-                "funnels", "labels", "remote_process_groups", "connections", "snippets")) {
+                "funnels", "labels", "remote_process_groups", "connections", "snippets",
+                "deletions", "cs_actions")) {
             final Object value = spec.get(key);
             if (value == null) {
                 continue;

@@ -30,15 +30,26 @@ import java.util.Map;
  * are bend candidates.  Writers that persist NiFi connection bends must exclude
  * the first and last points from each path so that only interior bend points
  * are stored.
+ *
+ * <p>Warnings are edge-scoped messages emitted when no fully clear route was
+ * found.  The single-argument constructor preserves backward compatibility.
  */
 public final class RoutingResult {
     private final Map<String, List<Position>> edgePaths;
+    private final List<RoutingWarning> warnings;
 
+    /** Backward-compatible constructor: no warnings. */
     public RoutingResult(Map<String, List<Position>> edgePaths) {
+        this(edgePaths, List.of());
+    }
+
+    public RoutingResult(Map<String, List<Position>> edgePaths, List<RoutingWarning> warnings) {
         LinkedHashMap<String, List<Position>> copy = new LinkedHashMap<>();
         edgePaths.forEach((edgeId, path) -> copy.put(edgeId, List.copyOf(path)));
         this.edgePaths = Collections.unmodifiableMap(copy);
+        this.warnings = List.copyOf(warnings);
     }
 
     public Map<String, List<Position>> getEdgePaths() { return edgePaths; }
+    public List<RoutingWarning> getWarnings() { return warnings; }
 }

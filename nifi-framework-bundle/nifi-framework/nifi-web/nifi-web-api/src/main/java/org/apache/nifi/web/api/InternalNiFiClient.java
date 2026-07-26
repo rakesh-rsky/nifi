@@ -40,9 +40,13 @@ import org.apache.nifi.controller.ScheduledState;
 import org.apache.nifi.controller.service.ControllerServiceState;
 import org.apache.nifi.copilot.service.NiFiAsyncRequestExecutor;
 import org.apache.nifi.copilot.service.NiFiAsyncRequestState;
+import org.apache.nifi.copilot.service.CapabilityDiscoveryException;
+import org.apache.nifi.copilot.service.CapabilityTypeSelector;
 import org.apache.nifi.copilot.service.NiFiClientException;
 import org.apache.nifi.copilot.service.NiFiClientOperations;
 import org.apache.nifi.copilot.service.NiFiRetryPolicy;
+import org.apache.nifi.c2.protocol.component.api.ControllerServiceDefinition;
+import org.apache.nifi.c2.protocol.component.api.ProcessorDefinition;
 import org.apache.nifi.diagnostics.DiagnosticLevel;
 import org.apache.nifi.flow.ExecutionEngine;
 import org.apache.nifi.groups.ProcessGroup;
@@ -209,18 +213,97 @@ public class InternalNiFiClient implements NiFiClientOperations {
     }
 
     @Override
-    public void ensureTypeCache() {
+    public List<Map<String, Object>> listProcessorTypes() {
+        return CapabilityTypeSelector.preferredTypes(
+                documentedTypes(serviceFacade.getProcessorTypes(null, null, null), "processor"));
+    }
+
+    @Override
+    public List<Map<String, Object>> listControllerServiceTypes() {
+        return CapabilityTypeSelector.preferredTypes(documentedTypes(
+                serviceFacade.getControllerServiceTypes(null, null, null, null, null, null, null),
+                "controller service"));
+    }
+
+    @Override
+    public Map<String, Object> getProcessorDefinition(
+            final String group, final String artifact, final String version, final String type) {
+        final ProcessorDefinition definition = serviceFacade.getProcessorDefinition(group, artifact, version, type);
+        return definition(definition, "processor", type);
+    }
+
+    @Override
+    public Map<String, Object> getControllerServiceDefinition(
+            final String group, final String artifact, final String version, final String type) {
+        final ControllerServiceDefinition definition =
+                serviceFacade.getControllerServiceDefinition(group, artifact, version, type);
+        return definition(definition, "controller service", type);
+    }
+
+    @Override
+    public synchronized void refreshCapabilityCaches() {
+        typeCache.clear();
+    }
+
+    private List<Map<String, Object>> documentedTypes(
+            final Set<DocumentedTypeDTO> types, final String category) {
+        if (types == null) {
+            throw new CapabilityDiscoveryException("NiFi returned null " + category + " type discovery results");
+        }
+        final List<Map<String, Object>> result = new ArrayList<>();
+        for (DocumentedTypeDTO type : types) {
+            if (type == null || type.getType() == null || type.getType().isBlank() || type.getBundle() == null
+                    || type.getBundle().getGroup() == null || type.getBundle().getArtifact() == null
+                    || type.getBundle().getVersion() == null) {
+                throw new CapabilityDiscoveryException("NiFi returned an incomplete " + category + " type");
+            }
+            result.add(objectMapper.convertValue(type, new TypeReference<>() {
+            }));
+        }
+        return List.copyOf(result);
+    }
+
+    private Map<String, Object> definition(
+            final Object definition, final String category, final String type) {
+        if (definition == null) {
+            throw new CapabilityDiscoveryException("NiFi returned no " + category + " definition for " + type);
+        }
+        final Map<String, Object> converted = objectMapper.convertValue(definition, new TypeReference<>() {
+        });
+        final Object descriptors = converted.get("propertyDescriptors");
+        if (descriptors != null && !(descriptors instanceof Map<?, ?>)) {
+            throw new CapabilityDiscoveryException(
+                    "NiFi returned an invalid " + category + " definition for " + type);
+        }
+        final Map<String, Object> normalized = new LinkedHashMap<>(converted);
+        normalized.putIfAbsent("propertyDescriptors", Map.of());
+        return Map.copyOf(normalized);
+    }
+
+    @Override
+    public synchronized void ensureTypeCache() {
         if (!typeCache.isEmpty()) {
             return;
         }
-        final Set<DocumentedTypeDTO> types = serviceFacade.getProcessorTypes(null, null, null);
-        if (types == null) {
+        final Set<DocumentedTypeDTO> discovered = serviceFacade.getProcessorTypes(null, null, null);
+        if (discovered == null) {
             return;
         }
-        for (DocumentedTypeDTO documentedType : types) {
-            if (documentedType.getType() != null && documentedType.getBundle() != null) {
-                typeCache.putIfAbsent(documentedType.getType(), documentedType);
+        final Map<String, DocumentedTypeDTO> byCoordinates = new HashMap<>();
+        for (DocumentedTypeDTO type : discovered) {
+            if (type.getType() != null && type.getBundle() != null) {
+                byCoordinates.put(type.getType() + "\0" + type.getBundle().getGroup()
+                        + "\0" + type.getBundle().getArtifact()
+                        + "\0" + type.getBundle().getVersion(), type);
             }
+        }
+        for (Map<String, Object> selected : CapabilityTypeSelector.preferredTypes(
+                documentedTypes(discovered, "processor"))) {
+            final Map<String, Object> bundle =
+                    (Map<String, Object>) selected.get("bundle");
+            final String key = selected.get("type") + "\0" + bundle.get("group")
+                    + "\0" + bundle.get("artifact") + "\0" + bundle.get("version");
+            typeCache.put(String.valueOf(selected.get("type")), byCoordinates.get(key));
         }
     }
 

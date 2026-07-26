@@ -46,16 +46,18 @@ public class RoutingStage implements PipelineStage {
         
         if (context.isIncrementalMode() && context.getAffectedComponentIds() != null && !context.getAffectedComponentIds().isEmpty()) {
             Map<String, List<Position>> filtered = new LinkedHashMap<>();
+
             for (Map.Entry<String, List<Position>> entry : fullRouting.getEdgePaths().entrySet()) {
                 LayoutEdge edge = context.getGraph().getEdges().get(entry.getKey());
                 if (edge != null) {
-                    if (context.getAffectedComponentIds().contains(edge.getSourceNodeId()) || 
+                    if (context.getAffectedComponentIds().contains(edge.getSourceNodeId()) ||
                         context.getAffectedComponentIds().contains(edge.getTargetNodeId())) {
                         filtered.put(entry.getKey(), entry.getValue());
                     }
                 }
             }
-            return context.withRouting(new RoutingResult(filtered));
+            return context.withRouting(new RoutingResult(
+                    filtered, fullRouting.getWarnings()));
         }
         
         return context.withRouting(fullRouting);

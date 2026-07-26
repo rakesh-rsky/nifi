@@ -21,4 +21,11 @@ import in.shrake.nifi.layout.core.model.LayoutOptions;
 
 public interface SpacingStrategy {
     SpacingValues computeSpacing(LayoutDimensions dimensions, int componentCount, LayoutOptions options);
+
+    default int computeRankSpacing(
+            final RankDemand demand,
+            final SpacingValues spacing,
+            final LayoutOptions options) {
+        return RankSpacingCalculator.calculate(demand, spacing, options);
+    }
 }

@@ -49,13 +49,14 @@ public class SubgraphPacker {
 
         int currentX = options.getMarginLeft();
         int currentY = options.getMarginTop();
-        int rowMaxHeight = 0;
+        int rowBottom = currentY;
         int gridColumns = (int) Math.ceil(Math.sqrt(sorted.size()));
         
         PackingStrategy strategy = options.getPackingStrategy() != null ? options.getPackingStrategy() : PackingStrategy.VERTICAL;
 
         List<ComponentUpdate> allUpdates = new ArrayList<>();
         Map<String, List<Position>> allRoutes = new LinkedHashMap<>();
+        List<String> allWarnings = new ArrayList<>();
         long totalComputeTime = 0;
         int totalRepositioned = 0;
 
@@ -63,12 +64,17 @@ public class SubgraphPacker {
             SubgraphLayout sg = sorted.get(i);
             BoundingBox bounds = sg.bounds();
             
-            int offsetX = currentX - bounds.x();
-            int offsetY = currentY - bounds.y();
+            int offsetX = snapForward(
+                    currentX - bounds.x(), options.getGridSize());
+            int offsetY = snapForward(
+                    currentY - bounds.y(), options.getGridSize());
+            int placedLeft = bounds.x() + offsetX;
+            int placedTop = bounds.y() + offsetY;
             
             LayoutResult res = sg.result();
             totalComputeTime += res.getComputationTimeMs();
             totalRepositioned += res.getTotalComponentsRepositioned();
+            allWarnings.addAll(res.getWarnings());
             
             for (ComponentUpdate update : res.getUpdates()) {
                 Position newPos = new Position(update.newPosition().x() + offsetX, update.newPosition().y() + offsetY);
@@ -85,22 +91,30 @@ public class SubgraphPacker {
             }
             
             if (strategy == PackingStrategy.VERTICAL) {
-                currentY += bounds.height() + options.getVerticalSpacing();
+                currentY = placedTop + bounds.height()
+                        + options.getVerticalSpacing();
             } else if (strategy == PackingStrategy.HORIZONTAL) {
-                currentX += bounds.width() + options.getHorizontalSpacing();
+                currentX = placedLeft + bounds.width()
+                        + options.getHorizontalSpacing();
             } else if (strategy == PackingStrategy.GRID) {
-                rowMaxHeight = Math.max(rowMaxHeight, bounds.height());
+                rowBottom = Math.max(rowBottom, placedTop + bounds.height());
                 if ((i + 1) % gridColumns == 0) {
                     currentX = options.getMarginLeft();
-                    currentY += rowMaxHeight + options.getVerticalSpacing();
-                    rowMaxHeight = 0;
+                    currentY = rowBottom + options.getVerticalSpacing();
+                    rowBottom = currentY;
                 } else {
-                    currentX += bounds.width() + options.getHorizontalSpacing();
+                    currentX = placedLeft + bounds.width()
+                            + options.getHorizontalSpacing();
                 }
             }
         }
         
-        return new LayoutResult(allUpdates, totalRepositioned, allRoutes, totalComputeTime, Collections.emptyList());
+        return new LayoutResult(allUpdates, totalRepositioned, allRoutes, totalComputeTime, allWarnings);
+    }
+
+    private static int snapForward(int value, int gridSize) {
+        int remainder = Math.floorMod(value, gridSize);
+        return remainder == 0 ? value : value + gridSize - remainder;
     }
     
     public static BoundingBox computeBounds(LayoutResult result) {

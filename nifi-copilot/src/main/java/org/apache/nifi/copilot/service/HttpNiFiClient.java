@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -446,6 +447,103 @@ public class HttpNiFiClient implements NiFiClientOperations {
     }
 
     @Override
+    public List<Map<String, Object>> listProcessorTypes() {
+        return capabilityTypes("/flow/processor-types", "processorTypes");
+    }
+
+    @Override
+    public List<Map<String, Object>> listControllerServiceTypes() {
+        return capabilityTypes("/flow/controller-service-types", "controllerServiceTypes");
+    }
+
+    @Override
+    public Map<String, Object> getProcessorDefinition(
+            final String group, final String artifact, final String version, final String type) {
+        return capabilityDefinition("/flow/processor-definition/", group, artifact, version, type);
+    }
+
+    @Override
+    public Map<String, Object> getControllerServiceDefinition(
+            final String group, final String artifact, final String version, final String type) {
+        return capabilityDefinition("/flow/controller-service-definition/", group, artifact, version, type);
+    }
+
+    @Override
+    public synchronized void refreshCapabilityCaches() {
+        typeBundleCache = null;
+    }
+
+    private List<Map<String, Object>> capabilityTypes(final String path, final String field) {
+        final Map<String, Object> response = get(path);
+        final Object raw = response.get(field);
+        if (!(raw instanceof List<?> values)) {
+            throw new CapabilityDiscoveryException("NiFi " + path + " response requires an array field '" + field + "'");
+        }
+        final List<Map<String, Object>> result = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof Map<?, ?> map)) {
+                throw new CapabilityDiscoveryException("NiFi " + path + " response contains a non-object type");
+            }
+            final Map<String, Object> type = stringKeyedMap(map, path + " type");
+            final Object typeName = type.get("type");
+            final Object bundleValue = type.get("bundle");
+            if (!(typeName instanceof String name) || name.isBlank() || !(bundleValue instanceof Map<?, ?> bundle)) {
+                throw new CapabilityDiscoveryException("NiFi " + path + " response contains an incomplete type");
+            }
+            final Map<String, Object> coordinates = stringKeyedMap(bundle, path + " bundle");
+            for (String coordinate : List.of("group", "artifact", "version")) {
+                if (!(coordinates.get(coordinate) instanceof String string) || string.isBlank()) {
+                    throw new CapabilityDiscoveryException("NiFi " + path
+                            + " response contains an incomplete bundle coordinate '" + coordinate + "'");
+                }
+            }
+            result.add(Map.copyOf(type));
+        }
+        return CapabilityTypeSelector.preferredTypes(result);
+    }
+
+    private Map<String, Object> capabilityDefinition(
+            final String prefix,
+            final String group,
+            final String artifact,
+            final String version,
+            final String type) {
+        final String path = prefix + encodePathSegment(group) + "/" + encodePathSegment(artifact)
+                + "/" + encodePathSegment(version) + "/" + encodePathSegment(type);
+        final Map<String, Object> definition = get(path);
+        if (definition.isEmpty()) {
+            throw new CapabilityDiscoveryException("NiFi " + path
+                    + " response must be a non-empty definition");
+        }
+        final Object descriptors = definition.get("propertyDescriptors");
+        if (descriptors != null && !(descriptors instanceof Map<?, ?>)) {
+            throw new CapabilityDiscoveryException("NiFi " + path
+                    + " response propertyDescriptors must be an object");
+        }
+        final Map<String, Object> normalized = new LinkedHashMap<>(definition);
+        normalized.putIfAbsent("propertyDescriptors", Map.of());
+        return Map.copyOf(normalized);
+    }
+
+    private String encodePathSegment(final String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Capability definition path segments must not be blank");
+        }
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private Map<String, Object> stringKeyedMap(final Map<?, ?> raw, final String context) {
+        final Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : raw.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                throw new CapabilityDiscoveryException("NiFi " + context + " contains a non-string field name");
+            }
+            result.put(key, entry.getValue());
+        }
+        return result;
+    }
+
+    @Override
     public void ensureTypeCache() {
         if (typeBundleCache != null) {
             return;
@@ -454,29 +552,12 @@ public class HttpNiFiClient implements NiFiClientOperations {
             if (typeBundleCache != null) {
                 return;
             }
-            final Map<String, Object> data = get("/flow/processor-types");
-            final Object rawTypes = data.get("processorTypes");
-            if (rawTypes != null && !(rawTypes instanceof List<?>)) {
-                throw new IllegalStateException("NiFi processor-types response contains an invalid processorTypes field");
-            }
             final Map<String, Map<String, Object>> initialized = new HashMap<>();
-            for (Object rawType : rawTypes == null ? List.of() : (List<?>) rawTypes) {
-                if (!(rawType instanceof Map<?, ?> type)) {
-                    throw new IllegalStateException("NiFi processor-types response contains an invalid type entry");
-                }
-                final Object rawFqn = type.get("type");
-                final Object rawBundle = type.get("bundle");
-                if (!(rawFqn instanceof String fqn) || fqn.isBlank() || !(rawBundle instanceof Map<?, ?> bundle)) {
-                    throw new IllegalStateException("NiFi processor-types response contains an incomplete type entry");
-                }
-                final Map<String, Object> immutableBundle = new HashMap<>();
-                for (Map.Entry<?, ?> entry : bundle.entrySet()) {
-                    if (!(entry.getKey() instanceof String key)) {
-                        throw new IllegalStateException("NiFi processor-types response contains an invalid bundle field");
-                    }
-                    immutableBundle.put(key, entry.getValue());
-                }
-                initialized.putIfAbsent(fqn, Map.copyOf(immutableBundle));
+            for (Map<String, Object> type : listProcessorTypes()) {
+                final String fqn = String.valueOf(type.get("type"));
+                final Map<String, Object> bundle =
+                        stringKeyedMap((Map<?, ?>) type.get("bundle"), "processor type bundle");
+                initialized.put(fqn, Map.copyOf(bundle));
             }
             typeBundleCache = Map.copyOf(initialized);
         }
