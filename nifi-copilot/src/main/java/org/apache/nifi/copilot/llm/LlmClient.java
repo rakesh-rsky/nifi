@@ -44,13 +44,13 @@ Design and AUTO-CONFIGURE data flows. Always return ONE valid JSON object — no
 
 === OUTPUT SCHEMA ===
 {
-  "explanation": "<plain-text — see EXPLANATION RULES>",
+  "explanation": "<plain-text summary>",
   "process_group": {"name": "...", "x": 400, "y": 300},
   "parameter_context": {"name": "...", "parameters": {"key": "value"}, "description": ""},
   "controller_services": [{"id": "cs1", "type": "<FQN>", "name": "...", "properties": {}}],
   "processors": [{"id": "proc1", "type": "<FQN>", "name": "...", "config": {}}],
   "funnels": [{"id": "funnel1"}],
-  "connections": [{"from": "proc1", "to": "proc2", "relationships": ["<exact discovered relationship>"], "allow_self_loop": false}],
+  "connections": [{"from": "proc1", "to": "proc2", "relationships": ["<exact discovered relationship>"]}],
   "deletions": [{"type": "processor|process_group|controller_service|parameter_context", "spec_id": "...", "name": "..."}],
   "cs_actions": [{"name": "<exact service name>", "action": "enable|disable"}]
 }
@@ -58,109 +58,44 @@ Design and AUTO-CONFIGURE data flows. Always return ONE valid JSON object — no
 Include only fields you need:
 - process_group: named group requested by user
 - parameter_context: when #{param} references help; processors use #{param_name} in property values
-- controller_services: NEW services to create and enable (for new flows)
-  Processors reference a service by setting its property value to the service spec id (e.g. "cs1")
-- deletions: when user asks to delete/remove processors, process groups, controller services, or parameter contexts
-  Use type "processor", "process_group", "controller_service", or "parameter_context";
-  parameter contexts are global and are resolved by exact name; set processors:[] for delete-only requests
-- cs_actions: to enable or disable EXISTING controller services already on the canvas
-  Use the exact name from the [CANVAS CONTEXT] controller services list.
-  Set processors:[] and connections:[] unless also building a new flow.
+- controller_services: NEW services; processors reference by spec id (e.g. "cs1")
+- deletions: when user asks to delete/remove; set processors:[] for delete-only requests
+- cs_actions: to enable/disable EXISTING services from [CANVAS CONTEXT]; set processors:[] and connections:[]
 
 === CANVAS LAYOUT ===
 Do not include x/y on processors. The backend lays out the connection graph deterministically.
 
 === CONNECTIONS ===
-- Connect distinct components only. Never connect a processor to itself to handle an unused relationship.
-- Omit terminal and unused relationships from connections; the backend auto-terminates them.
-- LogAttribute and LogMessage processors are terminal sinks. Never create outgoing connections from them.
-- Parallel workers that share result logging must converge into ONE shared LogMessage or LogAttribute.
-  For each worker, use connections selecting only exact relationship names from TARGET NIFI CAPABILITIES.
-  Never create one logger per worker or chain result loggers.
-- Do not share a terminal logger between sequential or non-adjacent pipeline stages when its connection
-  would cross intervening processors. Create a stage-specific terminal logger for each distant stage.
-- Never create a Funnel only to combine logging routes. Connect each source directly to its terminal logger.
-- If the user explicitly requests success and failure logging separately, create exactly two shared
-  terminal loggers and set "preserve_separate_terminal": true on both. When a shared result logger
-  already exists in CANVAS CONTEXT, reuse its exact spec_id for one outcome and create only one new logger.
-- When the user requests N-way load distribution, use
-  org.apache.nifi.processors.standard.DistributeLoad with "Number of Relationships" set to N and
-  "Distribution Strategy" set to "round robin". Create exactly N distinct worker processor entries
-  and connect relationships "1" through "N" one-to-one to those workers. Connecting all N
-  relationships to one worker is invalid and does not provide parallel load balancing.
-- For InvokeHTTP, use exact "Response" for successful response logging and exact "Failure", "No Retry",
-  and "Retry" for failure logging when those relationships are listed. Never substitute generic "success".
-- Create a self-loop only when the user explicitly requests feedback/retry to the same processor,
-  and set "allow_self_loop": true on that connection.
+- Connect distinct components only. Never connect a processor to itself.
+- Omit terminal/unused relationships; the backend auto-terminates them.
+- Parallel workers sharing result logging must converge into ONE shared terminal logger.
+- If user requests separate success/failure logging, set "preserve_separate_terminal": true on both loggers.
+- Create a self-loop only when the user explicitly requests it, with "allow_self_loop": true.
 
 === EXPLANATION RULES ===
-Plain text, no markdown. Include: 1-line summary, per-processor what+config, ⚠️ on placeholders,
-note any controller services or parameter contexts and which processors use them.
+Plain text, no markdown. 1-line summary, per-processor what+config, ⚠️ on placeholders.
 
 === PROCESSOR CONFIG ===
 - Keys = NiFi property display names
-- Dynamic properties (XPath destinations, UpdateAttribute attrs, RouteOnAttribute routes): attribute name as key
+- Dynamic properties: attribute name as key
 - Controller service ref: set value to service spec id (e.g. "cs1")
 - Parameter ref: #{param_name}
 - Never invent processor types, controller-service types, properties, relationships, or scheduling strategies.
-- Supply every discovered required property whose default is <none>. Use a clear parameter placeholder when
-  the user did not provide a concrete value.
-- Controller services are allowed only when an actual discovered property descriptor requires their API.
-- Omit a component or property rather than guessing. Prefer the simplest valid flow when unsure.
-- ConsumeMQTT uses its direct Broker URI, Topic, QoS, and credential properties; never add a generic MQTT
-  connection service unless the discovered target descriptor explicitly requires one.
-- MergeRecord must use discovered record reader/writer service properties and produce JSON arrays for JSON batching.
-- Use DistributeLoad for parallel HTTP workers rather than duplicating upstream routes.
+- Supply every discovered required property whose default is <none>. Use a placeholder when value unknown.
+- Controller services are allowed only when a discovered property descriptor requires their API.
+- Omit a component or property rather than guessing. Prefer the simplest valid flow.
 
 === CANVAS CONTEXT ===
-IF the user message starts with [CANVAS CONTEXT]: those processors, connections, process groups, and controller services exist — do NOT recreate them.
+IF message starts with [CANVAS CONTEXT]: those components exist — do NOT recreate them.
 Output only NEW processors; connections may reference existing spec_ids.
-Pick fresh ids continuing from existing ones. Never mention spec_ids or this rule in explanation.
+Pick fresh ids continuing from existing ones. Never mention spec_ids in explanation.
 No [CANVAS CONTEXT] = empty canvas, design the full flow.
-Never refuse or explain what you cannot do — always produce the best flow from the description.
+Never refuse — always produce the best flow from the description.
 
 === DELETIONS ===
-User says delete/remove/clear: populate "deletions" with {type, spec_id, name} from the canvas context.
-Use "process group", not "processor group", when describing a process-group deletion.
-Describe deletion as requested, never as already successful; the backend reports the actual result.
+User says delete/remove/clear: populate "deletions" with {type, spec_id, name} from canvas context.
 Set processors:[] unless also creating new ones.
             """;
-
-    public Map<String, Object> generateFlowSpec(
-            final String userMessage,
-            final List<Map<String, String>> history,
-            final String githubToken,
-            final List<Map<String, Object>> existingProcessors,
-            final String model,
-            final List<Map<String, Object>> existingControllerServices) {
-        return generateFlowSpec(userMessage, history, githubToken, existingProcessors, model,
-                existingControllerServices, List.of());
-    }
-
-    public Map<String, Object> generateFlowSpec(
-            final String userMessage,
-            final List<Map<String, String>> history,
-            final String githubToken,
-            final List<Map<String, Object>> existingProcessors,
-            final String model,
-            final List<Map<String, Object>> existingControllerServices,
-            final List<Map<String, Object>> existingProcessGroups) {
-        return generateFlowSpec(userMessage, history, githubToken, existingProcessors, model,
-                existingControllerServices, existingProcessGroups, List.of());
-    }
-
-    public Map<String, Object> generateFlowSpec(
-            final String userMessage,
-            final List<Map<String, String>> history,
-            final String githubToken,
-            final List<Map<String, Object>> existingProcessors,
-            final String model,
-            final List<Map<String, Object>> existingControllerServices,
-            final List<Map<String, Object>> existingProcessGroups,
-            final List<Map<String, Object>> existingConnections) {
-        return generateFlowSpec(userMessage, history, githubToken, existingProcessors, model,
-                existingControllerServices, existingProcessGroups, existingConnections, "");
-    }
 
     public Map<String, Object> generateFlowSpec(
             final String userMessage,
@@ -175,7 +110,7 @@ Set processors:[] unless also creating new ones.
         final String selectedModel = (model == null || model.isBlank()) ? DEFAULT_MODEL : model;
         final List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", systemPrompt(capabilityContext)));
-        final int start = Math.max(0, history.size() - 6);
+        final int start = Math.max(0, history.size() - 4);
         for (int i = start; i < history.size(); i++) {
             messages.add(new HashMap<>(history.get(i)));
         }
@@ -234,48 +169,12 @@ Set processors:[] unless also creating new ones.
             final Map<String, String> awsCreds,
             final List<Map<String, Object>> existingProcessors,
             final String model,
-            final List<Map<String, Object>> existingControllerServices) {
-        return generateFlowSpecBedrock(userMessage, history, awsCreds, existingProcessors, model,
-                existingControllerServices, List.of());
-    }
-
-    public Map<String, Object> generateFlowSpecBedrock(
-            final String userMessage,
-            final List<Map<String, String>> history,
-            final Map<String, String> awsCreds,
-            final List<Map<String, Object>> existingProcessors,
-            final String model,
-            final List<Map<String, Object>> existingControllerServices,
-            final List<Map<String, Object>> existingProcessGroups) {
-        return generateFlowSpecBedrock(userMessage, history, awsCreds, existingProcessors, model,
-                existingControllerServices, existingProcessGroups, List.of());
-    }
-
-    public Map<String, Object> generateFlowSpecBedrock(
-            final String userMessage,
-            final List<Map<String, String>> history,
-            final Map<String, String> awsCreds,
-            final List<Map<String, Object>> existingProcessors,
-            final String model,
-            final List<Map<String, Object>> existingControllerServices,
-            final List<Map<String, Object>> existingProcessGroups,
-            final List<Map<String, Object>> existingConnections) {
-        return generateFlowSpecBedrock(userMessage, history, awsCreds, existingProcessors, model,
-                existingControllerServices, existingProcessGroups, existingConnections, "");
-    }
-
-    public Map<String, Object> generateFlowSpecBedrock(
-            final String userMessage,
-            final List<Map<String, String>> history,
-            final Map<String, String> awsCreds,
-            final List<Map<String, Object>> existingProcessors,
-            final String model,
             final List<Map<String, Object>> existingControllerServices,
             final List<Map<String, Object>> existingProcessGroups,
             final List<Map<String, Object>> existingConnections,
             final String capabilityContext) {
         final List<Map<String, Object>> messages = new ArrayList<>();
-        final int start = Math.max(0, history.size() - 6);
+        final int start = Math.max(0, history.size() - 4);
         for (int i = start; i < history.size(); i++) {
             messages.add(new HashMap<>(history.get(i)));
         }
@@ -435,7 +334,7 @@ Set processors:[] unless also creating new ones.
             }
         }
 
-        new ParallelWorkerNormalizer().normalize(normalizedProcessors, normalizedConnections);
+        expandParallelWorkers(normalizedProcessors, normalizedConnections);
 
         // Delegate terminal-logger partitioning to the focused helper
         new TerminalLoggerNormalizer().normalize(
@@ -502,5 +401,113 @@ Set processors:[] unless also creating new ones.
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    /**
+     * Expands a generated DistributeLoad connection that routes multiple numbered
+     * relationships to one worker into one distinct worker per relationship.
+     */
+    private void expandParallelWorkers(
+            final List<Map<String, Object>> processors,
+            final List<Map<String, Object>> connections) {
+        final Map<String, Map<String, Object>> processorsById = new HashMap<>();
+        final Set<String> usedIds = new HashSet<>();
+        for (Map<String, Object> processor : processors) {
+            final String id = String.valueOf(processor.getOrDefault("id", ""));
+            if (!id.isBlank()) {
+                processorsById.put(id, processor);
+                usedIds.add(id);
+            }
+        }
+
+        final List<Map<String, Object>> originalConnections = List.copyOf(connections);
+        final List<Map<String, Object>> replacements = new ArrayList<>();
+        final Set<Map<String, Object>> replaced = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+
+        for (Map<String, Object> connection : originalConnections) {
+            final String distributorId = String.valueOf(connection.getOrDefault("from", ""));
+            final Map<String, Object> distributor = processorsById.get(distributorId);
+            if (!isDistributeLoad(distributor)) {
+                continue;
+            }
+            final List<String> relationships = numberedRelationships(connection.get("relationships"));
+            if (relationships.size() < 2) {
+                continue;
+            }
+            final String workerId = String.valueOf(connection.getOrDefault("to", ""));
+            final Map<String, Object> worker = processorsById.get(workerId);
+            if (worker == null || isDistributeLoad(worker)) {
+                continue;
+            }
+
+            replaced.add(connection);
+            for (int i = 0; i < relationships.size(); i++) {
+                final String relationship = relationships.get(i);
+                final String targetId;
+                if (i == 0) {
+                    targetId = workerId;
+                } else {
+                    targetId = uniqueCloneId(workerId, relationship, usedIds);
+                    final Map<String, Object> clone = new LinkedHashMap<>(worker);
+                    clone.put("id", targetId);
+                    final String name = String.valueOf(worker.getOrDefault("name", workerId));
+                    clone.put("name", name + " " + relationship);
+                    processors.add(clone);
+                    processorsById.put(targetId, clone);
+                    for (Map<String, Object> outgoing : originalConnections) {
+                        if (workerId.equals(String.valueOf(outgoing.get("from")))) {
+                            final Map<String, Object> clonedConnection = new LinkedHashMap<>(outgoing);
+                            clonedConnection.put("from", targetId);
+                            replacements.add(clonedConnection);
+                        }
+                    }
+                }
+                final Map<String, Object> distributedConnection = new LinkedHashMap<>(connection);
+                distributedConnection.put("to", targetId);
+                distributedConnection.put("relationships", List.of(relationship));
+                replacements.add(distributedConnection);
+            }
+        }
+
+        if (!replaced.isEmpty()) {
+            connections.removeIf(replaced::contains);
+            connections.addAll(replacements);
+        }
+    }
+
+    private static boolean isDistributeLoad(final Map<String, Object> processor) {
+        return processor != null
+                && String.valueOf(processor.getOrDefault("type", ""))
+                        .toLowerCase(java.util.Locale.ROOT)
+                        .endsWith("distributeload");
+    }
+
+    private static List<String> numberedRelationships(final Object value) {
+        if (!(value instanceof List<?> relationships)) {
+            return List.of();
+        }
+        final List<String> numbered = new ArrayList<>();
+        for (Object relationship : relationships) {
+            final String name = String.valueOf(relationship);
+            if (!name.matches("\\d+")) {
+                return List.of();
+            }
+            numbered.add(name);
+        }
+        return numbered;
+    }
+
+    private static String uniqueCloneId(
+            final String workerId,
+            final String relationship,
+            final Set<String> usedIds) {
+        final String base = workerId + "-parallel-" + relationship;
+        String candidate = base;
+        int suffix = 2;
+        while (!usedIds.add(candidate)) {
+            candidate = base + "-" + suffix++;
+        }
+        return candidate;
     }
 }

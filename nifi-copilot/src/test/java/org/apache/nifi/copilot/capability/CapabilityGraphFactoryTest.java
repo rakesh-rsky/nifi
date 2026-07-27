@@ -13,16 +13,14 @@ import org.apache.nifi.copilot.capability.CapabilityGraph.ProcessorNode;
 import org.apache.nifi.copilot.capability.CapabilityGraph.PropertyNode;
 import org.junit.jupiter.api.Test;
 
-class CapabilityGraphBuilderTest {
+class CapabilityGraphFactoryTest {
     private static final BundleCoordinate BUNDLE = new BundleCoordinate("group", "artifact", "1.0");
     private static final ServiceApi READER_API =
             new ServiceApi("org.apache.nifi.serialization.RecordReaderFactory", null);
     private static final ServiceApi SCHEMA_API =
             new ServiceApi("org.apache.nifi.schemaregistry.services.SchemaRegistry", null);
 
-    private final CapabilityGraphBuilder builder = new CapabilityGraphBuilder();
-
-    @Test
+        @Test
     void adaptsProcessorMetadataAndClassifiesServiceProperties() {
         final PropertyCapability reader = property("reader", true, READER_API);
         final PropertyCapability optionalSchema = property("schema", false, SCHEMA_API);
@@ -37,7 +35,7 @@ class CapabilityGraphBuilderTest {
                 Set.of("TIMER_DRIVEN"),
                 true);
 
-        final ProcessorNode node = builder.build(snapshot(Map.of(processor.type(), processor), Map.of()))
+        final ProcessorNode node = CapabilityGraph.from(snapshot(Map.of(processor.type(), processor), Map.of()))
                 .resolveProcessor("ConvertRecord")
                 .orElseThrow();
 
@@ -78,7 +76,7 @@ class CapabilityGraphBuilderTest {
                 false,
                 Set.of(SCHEMA_API));
 
-        final CapabilityGraph graph = builder.build(snapshot(
+        final CapabilityGraph graph = CapabilityGraph.from(snapshot(
                 Map.of(processor.type(), processor),
                 Map.of(reader.type(), reader, registry.type(), registry)));
 
@@ -103,7 +101,7 @@ class CapabilityGraphBuilderTest {
                 false,
                 Set.of(READER_API));
 
-        final ControllerServiceNode node = builder.build(snapshot(
+        final ControllerServiceNode node = CapabilityGraph.from(snapshot(
                         Map.of(), Map.of(service.type(), service)))
                 .resolveControllerService(service.type())
                 .orElseThrow();

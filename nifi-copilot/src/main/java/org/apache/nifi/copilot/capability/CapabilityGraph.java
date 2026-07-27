@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -176,6 +177,79 @@ public final class CapabilityGraph {
         return Collections.unmodifiableSet(sorted);
     }
 
+
+    /**
+     * Creates a {@code CapabilityGraph} from a discovered capability snapshot.
+     */
+    public static CapabilityGraph from(final CapabilitySnapshot snapshot) {
+        Objects.requireNonNull(snapshot, "Capability snapshot is required");
+        return new CapabilityGraph(
+                snapshot.processors().values().stream().map(CapabilityGraph::toProcessorNode).toList(),
+                snapshot.controllerServices().values().stream().map(CapabilityGraph::toControllerServiceNode).toList());
+    }
+
+    private static ProcessorNode toProcessorNode(final ProcessorCapability capability) {
+        final Map<String, PropertyNode> properties = toProperties(capability.properties());
+        return new ProcessorNode(
+                capability.type(),
+                capability.bundle(),
+                properties,
+                capability.supportsDynamicProperties(),
+                extractServiceApis(properties, true),
+                extractServiceApis(properties, false),
+                capability.relationships(),
+                capability.supportsDynamicRelationships(),
+                new SchedulingConstraints(
+                        capability.inputRequirement(),
+                        capability.supportedSchedulingStrategies(),
+                        capability.triggerSerially()));
+    }
+
+    private static ControllerServiceNode toControllerServiceNode(final ControllerServiceCapability capability) {
+        final Map<String, PropertyNode> properties = toProperties(capability.properties());
+        return new ControllerServiceNode(
+                capability.type(),
+                capability.bundle(),
+                properties,
+                capability.supportsDynamicProperties(),
+                capability.serviceApis(),
+                extractServiceApis(properties, true),
+                extractServiceApis(properties, false));
+    }
+
+    private static Map<String, PropertyNode> toProperties(final Map<String, PropertyCapability> capabilities) {
+        final Map<String, PropertyNode> properties = new LinkedHashMap<>();
+        capabilities.values().stream()
+                .sorted(Comparator.comparing(PropertyCapability::name))
+                .map(CapabilityGraph::toPropertyNode)
+                .forEach(property -> properties.put(property.name(), property));
+        return properties;
+    }
+
+    private static PropertyNode toPropertyNode(final PropertyCapability capability) {
+        return new PropertyNode(
+                capability.name(),
+                capability.displayName(),
+                capability.required(),
+                capability.defaultValue(),
+                capability.dynamic(),
+                capability.sensitive(),
+                capability.allowableValues(),
+                capability.dependencies(),
+                capability.requiredServiceApi());
+    }
+
+    private static Set<ServiceApi> extractServiceApis(
+            final Map<String, PropertyNode> properties,
+            final boolean required) {
+        final Set<ServiceApi> apis = new LinkedHashSet<>();
+        properties.values().stream()
+                .filter(property -> property.required() == required)
+                .map(PropertyNode::requiredControllerServiceApi)
+                .filter(Objects::nonNull)
+                .forEach(apis::add);
+        return apis;
+    }
     public record ProcessorNode(
             String type,
             BundleCoordinate bundle,

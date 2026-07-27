@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class CapabilityPromptRenderer {
-    static final int MAX_CONTEXT_CHARS = 12_000;
+    static final int MAX_CONTEXT_CHARS = 8_000;
     private static final int MAX_ALLOWABLE_VALUES = 12;
     private static final String HEADER = """
             [TARGET NIFI CAPABILITIES]
@@ -26,7 +26,6 @@ public class CapabilityPromptRenderer {
     private final IntentExtractor intentExtractor;
     private final ProcessorSeedRanker processorSeedRanker;
     private final DependencyClosureResolver closureResolver;
-    private final CapabilityGraphBuilder graphBuilder;
     private final CapabilityMetricsRegistry metrics;
 
     public CapabilityPromptRenderer() {
@@ -34,7 +33,6 @@ public class CapabilityPromptRenderer {
                 new IntentExtractor(),
                 new ProcessorSeedRanker(),
                 new DependencyClosureResolver(new PropertyRanker()),
-                new CapabilityGraphBuilder(),
                 new CapabilityMetricsRegistry());
     }
 
@@ -44,31 +42,15 @@ public class CapabilityPromptRenderer {
             final ProcessorSeedRanker processorSeedRanker,
             final DependencyClosureResolver closureResolver,
             final CapabilityMetricsRegistry metrics) {
-        this(
-                intentExtractor,
-                processorSeedRanker,
-                closureResolver,
-                new CapabilityGraphBuilder(),
-                metrics);
-    }
-
-    CapabilityPromptRenderer(
-            final IntentExtractor intentExtractor,
-            final ProcessorSeedRanker processorSeedRanker,
-            final DependencyClosureResolver closureResolver,
-            final CapabilityGraphBuilder graphBuilder,
-            final CapabilityMetricsRegistry metrics) {
         if (intentExtractor == null
                 || processorSeedRanker == null
                 || closureResolver == null
-                || graphBuilder == null
                 || metrics == null) {
             throw new IllegalArgumentException("Capability renderer collaborators are required");
         }
         this.intentExtractor = intentExtractor;
         this.processorSeedRanker = processorSeedRanker;
         this.closureResolver = closureResolver;
-        this.graphBuilder = graphBuilder;
         this.metrics = metrics;
     }
 
@@ -76,7 +58,7 @@ public class CapabilityPromptRenderer {
         if (snapshot == null) {
             throw new IllegalArgumentException("Capability snapshot is required");
         }
-        return render(userIntent, graphBuilder.build(snapshot), MAX_CONTEXT_CHARS);
+        return render(userIntent, CapabilityGraph.from(snapshot), MAX_CONTEXT_CHARS);
     }
 
     public String renderFromGraph(final String userIntent, final CapabilityGraph graph) {
@@ -178,11 +160,6 @@ public class CapabilityPromptRenderer {
                 ranked -> ranked.propertyClass() == PropertyClass.OPTIONAL,
                 false);
         appendRuntimeMetadata(context, closure);
-        appendProperties(
-                context,
-                closure,
-                ranked -> ranked.propertyClass() == PropertyClass.RUNTIME,
-                false);
 
         return context.toString();
     }

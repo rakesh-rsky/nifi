@@ -20,15 +20,12 @@ import org.apache.nifi.copilot.capability.CapabilityMetricsRegistry;
 import org.apache.nifi.copilot.capability.CapabilityRegistry;
 import org.apache.nifi.copilot.capability.CapabilityRegistryManager;
 import org.apache.nifi.copilot.capability.FlowSpecificationValidationException;
-import org.apache.nifi.copilot.capability.RepairContextExpander;
-import org.apache.nifi.copilot.capability.RepairHint;
-import org.apache.nifi.copilot.capability.RepairHintDeriver;
 import org.apache.nifi.copilot.capability.ValidatedFlowPlan;
 import org.apache.nifi.copilot.capability.ValidationIssue;
 import org.apache.nifi.copilot.llm.LlmClient;
 import org.apache.nifi.copilot.service.CapabilityDiscoveryException;
 import org.apache.nifi.copilot.service.NiFiClientOperations;
-import org.apache.nifi.copilot.store.SessionStore;
+import org.apache.nifi.copilot.service.SessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -49,8 +46,6 @@ public class CopilotController {
     private final SessionStore sessionStore;
     private final CapabilityRegistryManager capabilityRegistryManager;
     private final CapabilityPromptRenderer capabilityPromptRenderer;
-    private final RepairHintDeriver repairHintDeriver;
-    private final RepairContextExpander repairContextExpander;
     private final CapabilityMetricsRegistry capabilityMetrics;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -64,8 +59,6 @@ public class CopilotController {
             final SessionStore sessionStore,
             final CapabilityRegistryManager capabilityRegistryManager,
             final CapabilityPromptRenderer capabilityPromptRenderer,
-            final RepairHintDeriver repairHintDeriver,
-            final RepairContextExpander repairContextExpander,
             final CapabilityMetricsRegistry capabilityMetrics) {
         this.githubAuthManager = githubAuthManager;
         this.awsAuthManager = awsAuthManager;
@@ -75,8 +68,6 @@ public class CopilotController {
         this.sessionStore = sessionStore;
         this.capabilityRegistryManager = capabilityRegistryManager;
         this.capabilityPromptRenderer = capabilityPromptRenderer;
-        this.repairHintDeriver = repairHintDeriver;
-        this.repairContextExpander = repairContextExpander;
         this.capabilityMetrics = capabilityMetrics;
         this.githubAuthManager.validateSavedToken();
     }
@@ -90,7 +81,6 @@ public class CopilotController {
             final SessionStore sessionStore) {
         this(githubAuthManager, awsAuthManager, nifiClient, llmClient, flowBuilder, sessionStore,
                 new CapabilityRegistryManager(), new CapabilityPromptRenderer(),
-                new RepairHintDeriver(), new RepairContextExpander(),
                 new CapabilityMetricsRegistry());
     }
 
@@ -245,11 +235,10 @@ public class CopilotController {
         }
 
         final String capabilityContext;
-        final CapabilityGraph capabilityGraph;
         try {
             final CapabilityRegistry.CapabilitySet capabilities =
                     capabilityRegistryManager.capabilitySet(nifiClient);
-            capabilityGraph = capabilities.graph();
+            final CapabilityGraph capabilityGraph = capabilities.graph();
             capabilityContext = capabilityPromptRenderer.renderFromGraph(
                     req.message, capabilityGraph);
         } catch (CapabilityDiscoveryException e) {
@@ -263,7 +252,7 @@ public class CopilotController {
         Map<String, Object> generatedSpec = null;
         try {
             final PreparedGeneration prepared = generateAndPrepare(req, history, existing, existingCs,
-                    existingGroups, existingConnections, capabilityContext, capabilityGraph);
+                    existingGroups, existingConnections, capabilityContext);
             if (prepared.plan() == null) {
                 return validationFailure(prepared.specification(), prepared.issues());
             }
@@ -470,8 +459,7 @@ public class CopilotController {
             final List<Map<String, Object>> existingCs,
             final List<Map<String, Object>> existingGroups,
             final List<Map<String, Object>> existingConnections,
-            final String capabilityContext,
-            final CapabilityGraph capabilityGraph) {
+            final String capabilityContext) {
         final Map<String, Object> generated = generateSpecification(
                 req, req.message, history, existing, existingCs, existingGroups,
                 existingConnections, capabilityContext);
@@ -482,15 +470,11 @@ public class CopilotController {
         } catch (FlowSpecificationValidationException firstFailure) {
             capabilityMetrics.observeFirstPass(false, firstFailure.getReport().issues());
             capabilityMetrics.observeRepairAttempt();
-            final List<RepairHint> repairHints =
-                    repairHintDeriver.derive(firstFailure.getReport(), capabilityGraph);
-            final String repairCapabilityContext = repairContextExpander.expand(
-                    req.message, capabilityGraph, repairHints, generated);
             final String repairMessage = repairMessage(
                     req.message, generated, firstFailure.getReport().issues());
             final Map<String, Object> repaired = generateSpecification(
                     req, repairMessage, List.of(), existing, existingCs, existingGroups,
-                    existingConnections, repairCapabilityContext);
+                    existingConnections, capabilityContext);
             final Map<?, ?> repairUsage = repaired.get("_token_usage") instanceof Map<?, ?> value
                     ? value
                     : Map.of();

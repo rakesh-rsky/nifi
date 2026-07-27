@@ -1,4 +1,4 @@
-package org.apache.nifi.copilot.store;
+package org.apache.nifi.copilot.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -56,7 +56,7 @@ public class GitHubAuthManager {
     }
 
     public boolean deviceFlowActive() {
-        return !userCode.isBlank() && !isAuthenticated() && InstantNow.epochSec() < deviceExpiresAtEpochSec;
+        return !userCode.isBlank() && !isAuthenticated() && epochSec() < deviceExpiresAtEpochSec;
     }
 
     public Map<String, Object> authStatus() {
@@ -90,7 +90,7 @@ public class GitHubAuthManager {
             userCode = String.valueOf(data.get("user_code"));
             verificationUri = String.valueOf(data.getOrDefault("verification_uri", "https://github.com/login/device"));
             final int expires = Integer.parseInt(String.valueOf(data.getOrDefault("expires_in", 900)));
-            deviceExpiresAtEpochSec = InstantNow.epochSec() + expires;
+            deviceExpiresAtEpochSec = epochSec() + expires;
             pollIntervalSec = Math.max(Integer.parseInt(String.valueOf(data.getOrDefault("interval", 5))), 5);
             generation++;
             openBrowser(verificationUri);
@@ -148,7 +148,7 @@ public class GitHubAuthManager {
 
     private void pollToken() {
         final int myGeneration = generation;
-        if (InstantNow.epochSec() >= deviceExpiresAtEpochSec || deviceCode.isBlank()) {
+        if (epochSec() >= deviceExpiresAtEpochSec || deviceCode.isBlank()) {
             logger.info("GitHub device flow expired or device code cleared — stopping poll");
             userCode = "";
             return;
@@ -274,5 +274,9 @@ public class GitHubAuthManager {
         } catch (Exception e) {
             logger.warn("Could not delete credentials: {}", e.getMessage());
         }
+    }
+
+    private static long epochSec() {
+        return System.currentTimeMillis() / 1000L;
     }
 }

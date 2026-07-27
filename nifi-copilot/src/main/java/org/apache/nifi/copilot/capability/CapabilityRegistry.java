@@ -50,11 +50,10 @@ public final class CapabilityRegistry {
     private final Duration ttl;
     private final Clock clock;
     private final CapabilityDefinitionParser parser;
-    private final CapabilityGraphBuilder graphBuilder;
     private volatile PublishedCapabilities published;
 
     public CapabilityRegistry(final NiFiClientOperations client, final Duration ttl) {
-        this(client, ttl, Clock.systemUTC(), new CapabilityDefinitionParser(), new CapabilityGraphBuilder());
+        this(client, ttl, Clock.systemUTC(), new CapabilityDefinitionParser());
     }
 
     CapabilityRegistry(
@@ -62,27 +61,19 @@ public final class CapabilityRegistry {
             final Duration ttl,
             final Clock clock,
             final CapabilityDefinitionParser parser) {
-        this(client, ttl, clock, parser, new CapabilityGraphBuilder());
-    }
-
-    CapabilityRegistry(
-            final NiFiClientOperations client,
-            final Duration ttl,
-            final Clock clock,
-            final CapabilityDefinitionParser parser,
-            final CapabilityGraphBuilder graphBuilder) {
         if (client == null || ttl == null || ttl.isNegative() || ttl.isZero()) {
             throw new IllegalArgumentException("Client and positive capability cache TTL are required");
         }
-        if (clock == null || parser == null || graphBuilder == null) {
+        if (clock == null || parser == null) {
             throw new IllegalArgumentException("Capability cache collaborators are required");
         }
         this.client = client;
         this.ttl = ttl;
         this.clock = clock;
         this.parser = parser;
-        this.graphBuilder = graphBuilder;
     }
+
+
 
     public CapabilitySnapshot snapshot() {
         return capabilities().snapshot();
@@ -164,7 +155,7 @@ public final class CapabilityRegistry {
             }
             final CapabilitySnapshot complete = new CapabilitySnapshot(processors, services, clock.instant());
             final PublishedCapabilities discovered =
-                    new PublishedCapabilities(complete, graphBuilder.build(complete));
+                    new PublishedCapabilities(complete, CapabilityGraph.from(complete));
             published = discovered;
             return discovered;
         } catch (CapabilityDiscoveryException e) {

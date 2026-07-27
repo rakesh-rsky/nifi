@@ -124,7 +124,7 @@ class CapabilityPromptRendererTest {
                 Map.of(),
                 Instant.now());
         final CapabilityPromptRenderer renderer = new CapabilityPromptRenderer();
-        final CapabilityGraph graph = new CapabilityGraphBuilder().build(snapshot);
+        final CapabilityGraph graph = CapabilityGraph.from(snapshot);
 
         final String rendered = renderer.render("send to HTTP", graph, 750);
 
@@ -158,7 +158,7 @@ class CapabilityPromptRendererTest {
                             List.of(),
                             null));
         }
-        final CapabilityGraph graph = new CapabilityGraphBuilder().build(new CapabilitySnapshot(
+        final CapabilityGraph graph = CapabilityGraph.from(new CapabilitySnapshot(
                 Map.of(
                         "org.example.LogMessage",
                         processor("org.example.LogMessage", properties)),
@@ -186,7 +186,7 @@ class CapabilityPromptRendererTest {
             final String type = "org.example.LogProcessor" + processorIndex;
             processors.put(type, processor(type, properties));
         }
-        final CapabilityGraph graph = new CapabilityGraphBuilder().build(new CapabilitySnapshot(
+        final CapabilityGraph graph = CapabilityGraph.from(new CapabilitySnapshot(
                 processors, Map.of(), Instant.now()));
 
         final String rendered =

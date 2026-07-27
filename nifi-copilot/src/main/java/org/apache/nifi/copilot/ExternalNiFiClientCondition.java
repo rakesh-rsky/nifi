@@ -1,4 +1,4 @@
-package org.apache.nifi.copilot.config;
+package org.apache.nifi.copilot;
 
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;

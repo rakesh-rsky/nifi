@@ -65,15 +65,15 @@ public class AwsAuthManager {
     }
 
     public boolean isAuthenticated() {
-        return !ssoToken.isBlank() && InstantNow.epochSec() < ssoTokenExpiry && !accountId.isBlank() && !roleName.isBlank();
+        return !ssoToken.isBlank() && epochSec() < ssoTokenExpiry && !accountId.isBlank() && !roleName.isBlank();
     }
 
     private boolean deviceFlowActive() {
-        return !userCode.isBlank() && ssoToken.isBlank() && InstantNow.epochSec() < deviceExpiresAt;
+        return !userCode.isBlank() && ssoToken.isBlank() && epochSec() < deviceExpiresAt;
     }
 
     private boolean roleSelectionNeeded() {
-        return !ssoToken.isBlank() && InstantNow.epochSec() < ssoTokenExpiry && !availableRoles.isEmpty() && (accountId.isBlank() || roleName.isBlank());
+        return !ssoToken.isBlank() && epochSec() < ssoTokenExpiry && !availableRoles.isEmpty() && (accountId.isBlank() || roleName.isBlank());
     }
 
     public Map<String, Object> authStatus() {
@@ -128,7 +128,7 @@ public class AwsAuthManager {
             userCode = auth.userCode();
             verificationUri = auth.verificationUriComplete() != null ? auth.verificationUriComplete() : auth.verificationUri();
             final int expires = auth.expiresIn() == null ? 900 : auth.expiresIn();
-            deviceExpiresAt = InstantNow.epochSec() + expires;
+            deviceExpiresAt = epochSec() + expires;
             pollInterval = Math.max(auth.interval() == null ? 5 : auth.interval(), 5);
             pollingTask = poller.scheduleAtFixedRate(this::pollForToken, pollInterval, pollInterval, TimeUnit.SECONDS);
             return Map.of("user_code", userCode, "verification_uri", verificationUri, "expires_in", expires);
@@ -138,7 +138,7 @@ public class AwsAuthManager {
     }
 
     private void pollForToken() {
-        if (InstantNow.epochSec() >= deviceExpiresAt || deviceCode.isBlank()) {
+        if (epochSec() >= deviceExpiresAt || deviceCode.isBlank()) {
             userCode = "";
             if (pollingTask != null) {
                 pollingTask.cancel(true);
@@ -154,7 +154,7 @@ public class AwsAuthManager {
                     .build());
             if (token.accessToken() != null && !token.accessToken().isBlank()) {
                 ssoToken = token.accessToken();
-                ssoTokenExpiry = InstantNow.epochSec() + (token.expiresIn() == null ? 28800 : token.expiresIn());
+                ssoTokenExpiry = epochSec() + (token.expiresIn() == null ? 28800 : token.expiresIn());
                 userCode = "";
                 deviceCode = "";
                 discoverRoles();
@@ -238,7 +238,7 @@ public class AwsAuthManager {
         if (!isAuthenticated()) {
             throw new SecurityException("Not authenticated with AWS. Sign in first.");
         }
-        if (InstantNow.epochSec() + 300 >= tempCredsExpiry) {
+        if (epochSec() + 300 >= tempCredsExpiry) {
             refreshTempCredentials();
         }
         return Map.of(
@@ -340,5 +340,9 @@ public class AwsAuthManager {
         } catch (Exception e) {
             logger.warn("Could not delete AWS credentials: {}", e.getMessage());
         }
+    }
+
+    private static long epochSec() {
+        return System.currentTimeMillis() / 1000L;
     }
 }

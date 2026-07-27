@@ -31,15 +31,13 @@ import org.apache.nifi.copilot.capability.CapabilityRegistry;
 import org.apache.nifi.copilot.capability.CapabilityRegistryManager;
 import org.apache.nifi.copilot.capability.CapabilitySnapshot;
 import org.apache.nifi.copilot.capability.FlowSpecificationValidationException;
-import org.apache.nifi.copilot.capability.RepairContextExpander;
-import org.apache.nifi.copilot.capability.RepairHintDeriver;
 import org.apache.nifi.copilot.capability.ValidatedFlowPlan;
 import org.apache.nifi.copilot.capability.ValidationIssue;
 import org.apache.nifi.copilot.capability.ValidationReport;
 import org.apache.nifi.copilot.llm.LlmClient;
 import org.apache.nifi.copilot.service.CapabilityDiscoveryException;
 import org.apache.nifi.copilot.service.NiFiClientOperations;
-import org.apache.nifi.copilot.store.SessionStore;
+import org.apache.nifi.copilot.service.SessionStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -53,8 +51,6 @@ class CopilotControllerCapabilityTest {
     private FlowBuilder flowBuilder;
     private CapabilityRegistryManager manager;
     private CapabilityPromptRenderer renderer;
-    private RepairHintDeriver hintDeriver;
-    private RepairContextExpander contextExpander;
     private CapabilityMetricsRegistry metrics;
     private CapabilityGraph graph;
     private CopilotController controller;
@@ -68,17 +64,12 @@ class CopilotControllerCapabilityTest {
         flowBuilder = mock(FlowBuilder.class);
         manager = mock(CapabilityRegistryManager.class);
         renderer = mock(CapabilityPromptRenderer.class);
-        hintDeriver = mock(RepairHintDeriver.class);
-        contextExpander = mock(RepairContextExpander.class);
         metrics = mock(CapabilityMetricsRegistry.class);
         graph = new CapabilityGraph(List.of(), List.of());
         when(manager.capabilitySet(nifi)).thenReturn(new CapabilityRegistry.CapabilitySet(
                 new CapabilitySnapshot(Map.of(), Map.of(), Instant.now()),
                 graph));
         when(renderer.renderFromGraph(anyString(), eq(graph))).thenReturn("target capabilities");
-        when(hintDeriver.derive(any(ValidationReport.class), eq(graph))).thenReturn(List.of());
-        when(contextExpander.expand(anyString(), eq(graph), anyList(), anyMap()))
-                .thenReturn("expanded capabilities");
         controller = new CopilotController(
                 github,
                 aws,
@@ -88,8 +79,6 @@ class CopilotControllerCapabilityTest {
                 mock(SessionStore.class),
                 manager,
                 renderer,
-                hintDeriver,
-                contextExpander,
                 metrics);
     }
 
@@ -107,10 +96,6 @@ class CopilotControllerCapabilityTest {
         when(llm.generateFlowSpec(
                 anyString(), anyList(), anyString(), anyList(), anyString(),
                 anyList(), anyList(), anyList(), eq("target capabilities")))
-                .thenReturn(generated);
-        when(llm.generateFlowSpec(
-                anyString(), anyList(), anyString(), anyList(), anyString(),
-                anyList(), anyList(), anyList(), eq("expanded capabilities")))
                 .thenReturn(generated);
         final ValidationIssue issue = new ValidationIssue(
                 "bad", "type", "Unknown controller service", "Use a discovered type");
@@ -211,10 +196,7 @@ class CopilotControllerCapabilityTest {
         when(llm.generateFlowSpec(
                 anyString(), anyList(), anyString(), anyList(), anyString(),
                 anyList(), anyList(), anyList(), eq("target capabilities")))
-                .thenReturn(invalid);
-        when(llm.generateFlowSpec(
-                anyString(), anyList(), anyString(), anyList(), anyString(),
-                anyList(), anyList(), anyList(), eq("expanded capabilities")))
+                .thenReturn(invalid)
                 .thenReturn(repaired);
         final ValidationIssue issue = new ValidationIssue(
                 "proc1", "config.Max Queue Size", "Missing required property", "Set the property");
@@ -231,14 +213,6 @@ class CopilotControllerCapabilityTest {
 
         assertEquals("repaired", response.reply);
         assertEquals(Map.of("input", 17, "output", 8, "total", 25), response.tokens_used);
-        verify(llm).generateFlowSpec(
-                anyString(), anyList(), anyString(), anyList(), anyString(),
-                anyList(), anyList(), anyList(), eq("target capabilities"));
-        verify(llm).generateFlowSpec(
-                anyString(), anyList(), anyString(), anyList(), anyString(),
-                anyList(), anyList(), anyList(), eq("expanded capabilities"));
-        verify(hintDeriver).derive(any(ValidationReport.class), eq(graph));
-        verify(contextExpander).expand(eq("build flow"), eq(graph), anyList(), eq(invalid));
         verify(metrics).observeFirstPass(false, List.of(issue));
         verify(metrics).observeRepairAttempt();
         verify(metrics).observeRepairTokens(7, 3);

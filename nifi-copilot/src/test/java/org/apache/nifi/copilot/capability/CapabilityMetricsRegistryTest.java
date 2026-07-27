@@ -27,28 +27,11 @@ class CapabilityMetricsRegistryTest {
                 new IntentExtractor(),
                 new ProcessorSeedRanker(),
                 new DependencyClosureResolver(propertyRanker),
-                new CapabilityGraphBuilder(),
                 metrics);
-        final RepairContextExpander expander =
-                new RepairContextExpander(renderer, propertyRanker, metrics);
         final CapabilityGraph graph = graph();
         final String prompt = "Read local files secret-value-123";
 
         final String context = renderer.renderFromGraph(prompt, graph);
-        final RepairHint hint = new RepairHint(
-                ValidationIssueType.UNRESOLVED_CONTROLLER_SERVICE_REFERENCE,
-                "convert",
-                "config.reader",
-                "missing",
-                READER_API,
-                List.of("org.example.CSVReader"),
-                List.of("reader"),
-                Set.of());
-        final String repairContext = expander.expand(
-                prompt,
-                graph,
-                List.of(hint),
-                Map.of("processors", List.of(Map.of("type", "ConvertRecord"))));
         final ValidationIssue issue = new ValidationIssue(
                 "convert",
                 "config.reader",
@@ -70,9 +53,6 @@ class CapabilityMetricsRegistryTest {
         assertEquals((long) context.length(), snapshot.promptCharacters());
         assertEquals(1L, snapshot.intentCategories().get("SOURCE_LOCAL_FILE"));
         assertEquals(1L, snapshot.seedProcessorTypes().get("org.example.GetFile"));
-        assertEquals(1, snapshot.repairAddedProcessors());
-        assertEquals(1, snapshot.repairAddedServices());
-        assertEquals((long) repairContext.length(), snapshot.repairContextCharacters());
         assertEquals(1L, snapshot.validationIssueTypes().get("MISSING_REQUIRED_PROPERTY"));
         assertEquals(1, snapshot.firstPassInvalid());
         assertEquals(1, snapshot.repairAttempts());
