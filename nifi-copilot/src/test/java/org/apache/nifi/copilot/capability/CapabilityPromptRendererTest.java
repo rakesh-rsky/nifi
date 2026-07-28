@@ -46,6 +46,78 @@ class CapabilityPromptRendererTest {
     }
 
     @Test
+    void rendersIssueFocusedRepairContext() {
+        final CapabilityGraph graph = CapabilityGraph.from(new CapabilitySnapshot(
+                Map.of(
+                        "org.example.InvokeHTTP",
+                        processor("org.example.InvokeHTTP", Map.of(
+                                "url", property("url", "HTTP URL", true, null, null))),
+                        "org.example.Unrelated",
+                        processor("org.example.Unrelated", Map.of())),
+                Map.of(),
+                Instant.now()));
+        final ValidationIssue issue = new ValidationIssue(
+                "http",
+                "config.url",
+                "Missing required property",
+                "Set HTTP URL",
+                ValidationIssueType.MISSING_REQUIRED_PROPERTY,
+                "org.example.InvokeHTTP",
+                "",
+                null);
+
+        final String rendered =
+                new CapabilityPromptRenderer().renderForRepair(List.of(issue), graph);
+
+        assertTrue(rendered.contains("PROCESSOR org.example.InvokeHTTP"));
+        assertTrue(rendered.contains("internal=url"));
+        assertFalse(rendered.contains("org.example.Unrelated"));
+    }
+
+    @Test
+    void returnsEmptyRepairContextWhenIssueTypeCannotBeResolved() {
+        final CapabilityGraph graph = CapabilityGraph.from(new CapabilitySnapshot(
+                Map.of("org.example.Available", processor("org.example.Available", Map.of())),
+                Map.of(),
+                Instant.now()));
+        final ValidationIssue issue = new ValidationIssue(
+                "missing", "type", "Unknown", "Use installed type",
+                ValidationIssueType.UNKNOWN_PROCESSOR_TYPE,
+                "wrong.package.Missing",
+                "",
+                null);
+
+        assertEquals(
+                "",
+                new CapabilityPromptRenderer().renderForRepair(List.of(issue), graph));
+    }
+
+    @Test
+    void returnsEmptyRepairContextWhenMixedIssuesIncludeUnknownType() {
+        final CapabilityGraph graph = CapabilityGraph.from(new CapabilitySnapshot(
+                Map.of(
+                        "org.example.InvokeHTTP",
+                        processor("org.example.InvokeHTTP", Map.of()),
+                        "org.example.Available",
+                        processor("org.example.Available", Map.of())),
+                Map.of(),
+                Instant.now()));
+        final ValidationIssue known = new ValidationIssue(
+                "http", "config.url", "Missing", "Set URL",
+                ValidationIssueType.MISSING_REQUIRED_PROPERTY,
+                "org.example.InvokeHTTP", "", null);
+        final ValidationIssue unknown = new ValidationIssue(
+                "missing", "type", "Unknown", "Use installed type",
+                ValidationIssueType.UNKNOWN_PROCESSOR_TYPE,
+                "", "wrong.package.Missing", null);
+
+        assertEquals(
+                "",
+                new CapabilityPromptRenderer().renderForRepair(
+                        List.of(known, unknown), graph));
+    }
+
+    @Test
     void rendersRequiredApiConcreteImplementationsAndChainedDependencies() {
         final ServiceApi readerApi = new ServiceApi("org.example.ReaderApi", BUNDLE);
         final ServiceApi schemaApi = new ServiceApi("org.example.SchemaApi", BUNDLE);

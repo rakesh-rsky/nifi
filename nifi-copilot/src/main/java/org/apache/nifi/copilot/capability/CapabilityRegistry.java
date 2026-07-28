@@ -106,6 +106,18 @@ public final class CapabilityRegistry {
                         "Controller service type is unavailable or ambiguous: " + requestedType));
     }
 
+    public List<String> controllerServiceImplementations(final ServiceApi requiredApi) {
+        if (requiredApi == null) {
+            return List.of();
+        }
+        return snapshot().controllerServices().values().stream()
+                .filter(service -> service.serviceApis().stream()
+                        .anyMatch(provided -> compatible(requiredApi, provided)))
+                .map(ControllerServiceCapability::type)
+                .sorted()
+                .toList();
+    }
+
     private PublishedCapabilities capabilities() {
         final PublishedCapabilities current = published;
         if (isCurrent(current)) {
@@ -198,10 +210,12 @@ public final class CapabilityRegistry {
             return Optional.of(capabilities.get(alias));
         }
         T match = null;
+        final String requestedSimpleName =
+                requestedType.substring(requestedType.lastIndexOf('.') + 1);
         for (Map.Entry<String, T> entry : capabilities.entrySet()) {
             final String fqn = entry.getKey();
             final String simple = fqn.substring(fqn.lastIndexOf('.') + 1);
-            if (simple.equalsIgnoreCase(requestedType)) {
+            if (simple.equalsIgnoreCase(requestedSimpleName)) {
                 if (match != null) {
                     return Optional.empty();
                 }
@@ -209,6 +223,12 @@ public final class CapabilityRegistry {
             }
         }
         return Optional.ofNullable(match);
+    }
+
+    private boolean compatible(final ServiceApi required, final ServiceApi provided) {
+        return required.type().equals(provided.type())
+                && (required.bundle() == null || provided.bundle() == null
+                || required.bundle().equals(provided.bundle()));
     }
 
     private record Coordinates(String type, BundleCoordinate bundle) {

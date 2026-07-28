@@ -328,6 +328,8 @@ Set processors:[] unless also creating new ones.
             for (Object connectionValue : connections) {
                 if (connectionValue instanceof Map<?, ?> connection) {
                     normalizedConnections.add(copyStringMap(connection));
+                } else if (connectionValue == null) {
+                    logger.warn("Removed null entry from generated connections");
                 } else {
                     otherConnectionValues.add(connectionValue);
                 }

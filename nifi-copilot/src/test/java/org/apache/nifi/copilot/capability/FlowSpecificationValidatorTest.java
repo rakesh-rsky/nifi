@@ -25,6 +25,7 @@ class FlowSpecificationValidatorTest {
                 type("org.apache.nifi.processors.mqtt.ConsumeMQTT"),
                 type("org.apache.nifi.processors.standard.MergeRecord"),
                 type("org.apache.nifi.processors.standard.InvokeHTTP"),
+                type("example.AmbiguousProcessor"),
                 type("example.DynamicProcessor")));
         when(client.listControllerServiceTypes()).thenReturn(List.of(
                 serviceType("example.MqttConnection", "example.MqttApi"),
@@ -52,6 +53,9 @@ class FlowSpecificationValidatorTest {
                         List.of(property("remote-url", "Remote URL", true, null),
                                 allowable("method", "HTTP Method", "GET", "POST")),
                         List.of("response", "failure"), List.of("TIMER_DRIVEN", "CRON_DRIVEN")));
+        when(client.getProcessorDefinition("g", "a", "1", "example.AmbiguousProcessor"))
+                .thenReturn(processorDefinition("example.AmbiguousProcessor", false,
+                        List.of(), List.of("success", "response", "failure"), List.of("TIMER_DRIVEN")));
         final Map<String, Object> dynamicDefinition = new java.util.LinkedHashMap<>(
                 processorDefinition("example.DynamicProcessor", false, List.of(),
                         List.of("success"), List.of("TIMER_DRIVEN")));
@@ -179,6 +183,8 @@ class FlowSpecificationValidatorTest {
         assertEquals(ValidationIssueType.MISSING_REQUIRED_PROPERTY, reader.issueType());
         assertEquals("org.apache.nifi.processors.standard.MergeRecord", reader.capabilityType());
         assertEquals("example.RecordReaderApi", reader.requiredApi().type());
+        assertTrue(reader.suggestedFix().contains("Record Reader"));
+        assertTrue(reader.suggestedFix().contains("record-reader"));
         assertEquals("org.apache.nifi.processors.standard.MergeRecord", relationship.capabilityType());
         assertEquals("unknown", relationship.rejectedValue());
     }
@@ -254,7 +260,7 @@ class FlowSpecificationValidatorTest {
     }
 
     @Test
-    void appliesAndValidatesEffectiveSuccessRelationship() {
+    void infersOnlyUnambiguousSafeRelationship() {
         final Map<String, Object> accepted = new java.util.LinkedHashMap<>(
                 Map.of("from", "consumer", "to", "destination"));
         final ValidatedFlowPlan plan = validator.validateAndNormalize(spec(
@@ -264,10 +270,20 @@ class FlowSpecificationValidatorTest {
         assertEquals(List.of("success"),
                 maps(plan.specification().get("connections")).getFirst().get("relationships"));
 
+        final Map<String, Object> mergeConnection = new java.util.LinkedHashMap<>(
+                Map.of("from", "merge", "to", "destination"));
+        final ValidatedFlowPlan mergePlan = validator.validateAndNormalize(spec(
+                List.of(service("reader", "example.RecordReader"), service("writer", "example.RecordWriter")),
+                List.of(processor("merge", "MergeRecord",
+                        Map.of("Record Reader", "reader", "Record Writer", "writer"))),
+                List.of(mergeConnection)));
+        assertEquals(List.of("merged"),
+                maps(mergePlan.specification().get("connections")).getFirst().get("relationships"));
+
         final ValidationReport rejected = validator.validate(spec(
-                List.of(), List.of(processor("merge", "MergeRecord", Map.of())),
-                List.of(new java.util.LinkedHashMap<>(Map.of("from", "merge", "to", "destination")))));
-        assertReasons(rejected, "Unknown source relationship 'success'");
+                List.of(), List.of(processor("ambiguous", "example.AmbiguousProcessor", Map.of())),
+                List.of(new java.util.LinkedHashMap<>(Map.of("from", "ambiguous", "to", "destination")))));
+        assertReasons(rejected, "Source relationship is required");
     }
 
     @Test

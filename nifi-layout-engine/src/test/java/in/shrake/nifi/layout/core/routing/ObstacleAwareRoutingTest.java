@@ -138,6 +138,27 @@ class ObstacleAwareRoutingTest {
                 "DirectRouter must not emit warnings");
     }
 
+    @Test
+    void directRouterSelfLoopUsesExteriorPath() {
+        LayoutNode component = node("component", 100, 100, 100, 80);
+        LayoutGraph graph = graph(
+                map("component", component),
+                map("self-loop", fwdEdge("self-loop", "component", "component")));
+
+        RoutingResult result = new DirectRouter().computeRoutes(
+                graph, coordsFromGraph(graph), DEFAULTS);
+        List<Position> path = result.getEdgePaths().get("self-loop");
+
+        assertNotNull(path, "direct-mode self-loop path must be present");
+        assertTrue(path.size() > 2, "direct-mode self-loop must use exterior bends");
+        for (int index = 1; index < path.size() - 1; index++) {
+            assertNotStrictlyInside(
+                    path.get(index),
+                    component.getBoundingBox(),
+                    "direct-mode self-loop interior bend[" + index + "]");
+        }
+    }
+
     // -------------------------------------------------------------------------
     // 3. Blocked corridor → obstacle-aware routing finds clear alternative
     // -------------------------------------------------------------------------
@@ -874,7 +895,7 @@ class ObstacleAwareRoutingTest {
         assertEquals(1, result.getWarnings().stream()
                 .filter(warning -> warning.startsWith("edge a-b:"))
                 .count());
-        assertEquals(1, result.getWarnings().stream()
+        assertEquals(0, result.getWarnings().stream()
                 .filter(warning -> warning.startsWith("edge c-d:"))
                 .count());
     }

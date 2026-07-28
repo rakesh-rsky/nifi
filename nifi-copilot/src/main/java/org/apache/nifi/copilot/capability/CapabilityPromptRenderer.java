@@ -1,6 +1,9 @@
 package org.apache.nifi.copilot.capability;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import org.apache.nifi.copilot.capability.CapabilityGraph.PropertyNode;
@@ -63,6 +66,43 @@ public class CapabilityPromptRenderer {
 
     public String renderFromGraph(final String userIntent, final CapabilityGraph graph) {
         return render(userIntent, graph, MAX_CONTEXT_CHARS);
+    }
+
+    public String renderForRepair(
+            final List<ValidationIssue> issues,
+            final CapabilityGraph graph) {
+        if (issues == null || issues.isEmpty() || graph == null) {
+            return "";
+        }
+        final Map<String, CapabilityGraph.ProcessorNode> processors = new LinkedHashMap<>();
+        for (ValidationIssue issue : issues) {
+            final Optional<CapabilityGraph.ProcessorNode> processor =
+                    graph.resolveProcessor(issue.capabilityType());
+            if (processor.isEmpty()) {
+                return "";
+            }
+            processors.putIfAbsent(processor.get().type(), processor.get());
+        }
+        if (processors.isEmpty()) {
+            return "";
+        }
+        final WorkflowIntent intent = intentExtractor.extract(issues.stream()
+                .map(issue -> issue.capabilityType() + ' ' + issue.reason() + ' ' + issue.suggestedFix())
+                .reduce("", (left, right) -> left + ' ' + right));
+        final List<ProcessorSeedRanker.RankedProcessor> seeds = processors.values().stream()
+                .map(processor -> new ProcessorSeedRanker.RankedProcessor(
+                        processor, 1, Set.of("validation-issue")))
+                .toList();
+        for (int seedCount = seeds.size(); seedCount > 0; seedCount--) {
+            try {
+                return render(
+                        closureResolver.resolve(graph, intent, seeds.subList(0, seedCount)),
+                        MAX_CONTEXT_CHARS);
+            } catch (RequiredContextOverflowException e) {
+                // Drop the last deterministic seed until required repair facts fit.
+            }
+        }
+        return "";
     }
 
     String render(

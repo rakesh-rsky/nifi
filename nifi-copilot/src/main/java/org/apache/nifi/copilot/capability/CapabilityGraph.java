@@ -95,7 +95,8 @@ public final class CapabilityGraph {
         if (exact != null) {
             return Optional.of(exact);
         }
-        return Optional.ofNullable(byUniqueSimpleName.get(requested.toLowerCase(Locale.ROOT)));
+        return Optional.ofNullable(byUniqueSimpleName.get(
+                simpleName(requested).toLowerCase(Locale.ROOT)));
     }
 
     private static <T> Map<String, T> indexByType(

@@ -38,6 +38,7 @@ import java.util.Map;
  * zero interior bend points (full-path semantics: strip first and last).
  */
 public class DirectRouter implements RoutingStrategy {
+    private static final int OBSTACLE_CLEARANCE = 10;
 
     @Override
     public RoutingResult computeRoutes(LayoutGraph graph, CoordinateAssignment coordinates,
@@ -45,6 +46,13 @@ public class DirectRouter implements RoutingStrategy {
         Map<String, List<Position>> routes = new LinkedHashMap<>();
         List<RoutingWarning> warnings = new ArrayList<>();
         RoutingResult orthogonalRoutes = null;
+        Map<String, BoundingBox> componentBounds = new LinkedHashMap<>();
+        for (String nodeId : graph.getNodes().keySet()) {
+            BoundingBox bounds = coordinates.getBounds().get(nodeId);
+            if (bounds != null) {
+                componentBounds.put(nodeId, bounds);
+            }
+        }
 
         for (LayoutEdge edge : graph.getEdges().values()) {
             BoundingBox sBb = coordinates.getBounds().get(edge.getSourceNodeId());
@@ -53,19 +61,24 @@ public class DirectRouter implements RoutingStrategy {
             if (sBb == null || tBb == null) {
                 continue;
             }
+            if (edge.isSelfLoop()) {
+                if (orthogonalRoutes == null) {
+                    orthogonalRoutes = new OrthogonalRouter()
+                            .computeRoutes(graph, coordinates, options);
+                }
+                routes.put(edge.getId(), orthogonalRoutes.getEdgePaths().get(edge.getId()));
+                orthogonalRoutes.getWarnings().stream()
+                        .filter(warning -> warning.edgeId().equals(edge.getId()))
+                        .forEach(warnings::add);
+                continue;
+            }
             // Anchor on the face that geometrically faces the other component so that
             // backward edges (source visually past target on the primary axis) exit and
             // enter on the correct side without passing through the endpoint interior.
             Position src = geometricExitAnchor(sBb, tBb);
             Position dst = geometricEntryAnchor(sBb, tBb);
             List<Position> directPath = List.of(src, dst);
-            List<BoundingBox> obstacles = coordinates.getBounds().entrySet().stream()
-                    .filter(entry -> graph.getNode(entry.getKey()) != null)
-                    .filter(entry -> !entry.getKey().equals(edge.getSourceNodeId()))
-                    .filter(entry -> !entry.getKey().equals(edge.getTargetNodeId()))
-                    .map(Map.Entry::getValue)
-                    .toList();
-            if (Geometry.pathIntersectsAnyObstacle(directPath, obstacles, 10)) {
+            if (intersectsObstacle(src, dst, componentBounds, edge)) {
                 if (orthogonalRoutes == null) {
                     orthogonalRoutes = new OrthogonalRouter()
                             .computeRoutes(graph, coordinates, options);
@@ -80,6 +93,23 @@ public class DirectRouter implements RoutingStrategy {
         }
 
         return new RoutingResult(routes, warnings);
+    }
+
+    private static boolean intersectsObstacle(
+            Position source,
+            Position target,
+            Map<String, BoundingBox> componentBounds,
+            LayoutEdge edge) {
+        for (Map.Entry<String, BoundingBox> entry : componentBounds.entrySet()) {
+            String componentId = entry.getKey();
+            if (!componentId.equals(edge.getSourceNodeId())
+                    && !componentId.equals(edge.getTargetNodeId())
+                    && Geometry.segmentIntersectsBounds(
+                            source, target, entry.getValue(), OBSTACLE_CLEARANCE)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

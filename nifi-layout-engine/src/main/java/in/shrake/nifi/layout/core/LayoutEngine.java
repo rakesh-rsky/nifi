@@ -277,6 +277,7 @@ public class LayoutEngine {
             }
         }
         List<String> routingWarnings = allRoutes.getWarnings().stream()
+            .filter(warning -> affectedRoutes.containsKey(warning.edgeId()))
             .map(Object::toString)
             .collect(Collectors.toCollection(ArrayList::new));
         return new LayoutResult(updates, repositioned, affectedRoutes,

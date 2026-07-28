@@ -59,6 +59,29 @@ class ParameterContextDeployerTest {
         verify(nifi).bindParameterContextToProcessGroup("pg", "pc-2");
     }
 
+    @Test
+    void createsThirdContextNameWhenFirstTwoAreIncompatible() {
+        final NiFiClientOperations nifi = mock(NiFiClientOperations.class);
+        when(nifi.listParameterContexts()).thenReturn(List.of(
+                parameterContext(
+                        "pc-1", "Parameters", parameter("url", "old-url-1", false)),
+                parameterContext(
+                        "pc-2", "Parameters (2)", parameter("url", "old-url-2", false))));
+        when(nifi.createParameterContext(eq("Parameters (3)"), anyMap(), eq("")))
+                .thenReturn(Map.of("id", "pc-3"));
+
+        ParameterContextDeployer.deploy(
+                parameterContextSpec("Parameters", Map.of("url", "new-url")),
+                "pg", null, new OwnershipLedger("pg"), new ComponentResolver(), nifi,
+                new FlowDeploymentMetricsRegistry());
+
+        verify(nifi, never()).createParameterContext(eq("Parameters"), anyMap(), anyString());
+        verify(nifi, never()).createParameterContext(eq("Parameters (2)"), anyMap(), anyString());
+        verify(nifi).createParameterContext(
+                "Parameters (3)", Map.of("url", "new-url"), "");
+        verify(nifi).bindParameterContextToProcessGroup("pg", "pc-3");
+    }
+
     private static Map<String, Object> parameterContextSpec(
             final String name, final Map<String, Object> parameters) {
         return Map.of("name", name, "parameters", parameters);

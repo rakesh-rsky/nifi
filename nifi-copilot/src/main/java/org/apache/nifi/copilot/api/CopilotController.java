@@ -9,7 +9,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.apache.nifi.copilot.auth.AwsAuthManager;
 import org.apache.nifi.copilot.builder.FlowBuilder;
@@ -22,6 +24,7 @@ import org.apache.nifi.copilot.capability.CapabilityRegistryManager;
 import org.apache.nifi.copilot.capability.FlowSpecificationValidationException;
 import org.apache.nifi.copilot.capability.ValidatedFlowPlan;
 import org.apache.nifi.copilot.capability.ValidationIssue;
+import org.apache.nifi.copilot.capability.ValidationIssueType;
 import org.apache.nifi.copilot.llm.LlmClient;
 import org.apache.nifi.copilot.service.CapabilityDiscoveryException;
 import org.apache.nifi.copilot.service.NiFiClientOperations;
@@ -37,6 +40,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping(value = "/nifi-api/copilot")
 public class CopilotController {
     private static final Logger logger = LoggerFactory.getLogger(CopilotController.class);
+    private static final int MAX_REPAIR_HINTS = 8;
+    private static final int MAX_REPAIR_HINT_CHARS = 3000;
+    private static final int MAX_LLM_REPAIR_ATTEMPTS = 2;
+    private static final Set<String> UNSAFE_IMPLICIT_RELATIONSHIPS = Set.of(
+            "failure", "original", "retry", "self", "unmatched");
 
     private final GitHubAuthManager githubAuthManager;
     private final AwsAuthManager awsAuthManager;
@@ -235,10 +243,11 @@ public class CopilotController {
         }
 
         final String capabilityContext;
+        final CapabilityGraph capabilityGraph;
         try {
             final CapabilityRegistry.CapabilitySet capabilities =
                     capabilityRegistryManager.capabilitySet(nifiClient);
-            final CapabilityGraph capabilityGraph = capabilities.graph();
+            capabilityGraph = capabilities.graph();
             capabilityContext = capabilityPromptRenderer.renderFromGraph(
                     req.message, capabilityGraph);
         } catch (CapabilityDiscoveryException e) {
@@ -252,7 +261,7 @@ public class CopilotController {
         Map<String, Object> generatedSpec = null;
         try {
             final PreparedGeneration prepared = generateAndPrepare(req, history, existing, existingCs,
-                    existingGroups, existingConnections, capabilityContext);
+                    existingGroups, existingConnections, capabilityContext, capabilityGraph);
             if (prepared.plan() == null) {
                 return validationFailure(prepared.specification(), prepared.issues());
             }
@@ -459,7 +468,8 @@ public class CopilotController {
             final List<Map<String, Object>> existingCs,
             final List<Map<String, Object>> existingGroups,
             final List<Map<String, Object>> existingConnections,
-            final String capabilityContext) {
+            final String capabilityContext,
+            final CapabilityGraph capabilityGraph) {
         final Map<String, Object> generated = generateSpecification(
                 req, req.message, history, existing, existingCs, existingGroups,
                 existingConnections, capabilityContext);
@@ -468,32 +478,175 @@ public class CopilotController {
             capabilityMetrics.observeFirstPass(true, List.of());
             return new PreparedGeneration(generated, plan, List.of());
         } catch (FlowSpecificationValidationException firstFailure) {
-            capabilityMetrics.observeFirstPass(false, firstFailure.getReport().issues());
+            List<ValidationIssue> currentIssues = firstFailure.getReport().issues();
+            capabilityMetrics.observeFirstPass(false, currentIssues);
             capabilityMetrics.observeRepairAttempt();
-            final String repairMessage = repairMessage(
-                    req.message, generated, firstFailure.getReport().issues());
-            final Map<String, Object> repaired = generateSpecification(
-                    req, repairMessage, List.of(), existing, existingCs, existingGroups,
-                    existingConnections, capabilityContext);
-            final Map<?, ?> repairUsage = repaired.get("_token_usage") instanceof Map<?, ?> value
-                    ? value
-                    : Map.of();
-            capabilityMetrics.observeRepairTokens(
-                    intValue(repairUsage.get("input")),
-                    intValue(repairUsage.get("output")));
-            final Map<String, Object> repairedWithUsage = combineTokenUsage(generated, repaired);
-            try {
-                final ValidatedFlowPlan plan =
-                        flowBuilder.prepareFlow(repairedWithUsage, nifiClient, true);
-                capabilityMetrics.observeRepairResult(true, List.of());
-                return new PreparedGeneration(repairedWithUsage, plan, List.of());
-            } catch (FlowSpecificationValidationException finalFailure) {
-                capabilityMetrics.observeRepairResult(
-                        false, finalFailure.getReport().issues());
-                return new PreparedGeneration(
-                        repairedWithUsage, null, finalFailure.getReport().issues());
+            final Optional<Map<String, Object>> javaRepaired =
+                    relationshipRepair(generated, currentIssues);
+            Map<String, Object> currentSpecification = generated;
+            if (javaRepaired.isPresent()) {
+                try {
+                    final ValidatedFlowPlan plan =
+                            flowBuilder.prepareFlow(javaRepaired.get(), nifiClient, true);
+                    capabilityMetrics.observeRepairTokens(0, 0);
+                    capabilityMetrics.observeRepairResult(true, List.of());
+                    return new PreparedGeneration(javaRepaired.get(), plan, List.of());
+                } catch (FlowSpecificationValidationException javaFailure) {
+                    currentSpecification = javaRepaired.get();
+                    currentIssues = javaFailure.getReport().issues();
+                }
+            }
+            int repairInputTokens = 0;
+            int repairOutputTokens = 0;
+            final Set<String> issueStates = new HashSet<>();
+            issueStates.add(issueFingerprint(currentIssues));
+            for (int attempt = 0; attempt < MAX_LLM_REPAIR_ATTEMPTS; attempt++) {
+                final String repairMessage = repairMessage(
+                        req.message, currentSpecification, currentIssues);
+                final String focusedContext =
+                        capabilityPromptRenderer.renderForRepair(currentIssues, capabilityGraph);
+                final Map<String, Object> repaired = generateSpecification(
+                        req, repairMessage, List.of(), existing, existingCs, existingGroups,
+                        existingConnections,
+                        focusedContext == null || focusedContext.isBlank()
+                                ? capabilityContext : focusedContext);
+                final Map<?, ?> repairUsage =
+                        repaired.get("_token_usage") instanceof Map<?, ?> value ? value : Map.of();
+                repairInputTokens += intValue(repairUsage.get("input"));
+                repairOutputTokens += intValue(repairUsage.get("output"));
+                final Map<String, Object> repairedWithUsage =
+                        combineTokenUsage(currentSpecification, repaired);
+                try {
+                    final ValidatedFlowPlan plan =
+                            flowBuilder.prepareFlow(repairedWithUsage, nifiClient, true);
+                    capabilityMetrics.observeRepairTokens(repairInputTokens, repairOutputTokens);
+                    capabilityMetrics.observeRepairResult(true, List.of());
+                    return new PreparedGeneration(repairedWithUsage, plan, List.of());
+                } catch (FlowSpecificationValidationException repairFailure) {
+                    final List<ValidationIssue> nextIssues = repairFailure.getReport().issues();
+                    currentSpecification = repairedWithUsage;
+                    final String nextState = issueFingerprint(nextIssues);
+                    if (nextIssues.size() >= currentIssues.size() || !issueStates.add(nextState)) {
+                        currentIssues = nextIssues;
+                        break;
+                    }
+                    currentIssues = nextIssues;
+                }
+            }
+            capabilityMetrics.observeRepairTokens(repairInputTokens, repairOutputTokens);
+            capabilityMetrics.observeRepairResult(false, currentIssues);
+            return new PreparedGeneration(currentSpecification, null, currentIssues);
+        }
+    }
+
+    private Optional<Map<String, Object>> relationshipRepair(
+            final Map<String, Object> generated,
+            final List<ValidationIssue> issues) {
+        if (issues == null || issues.isEmpty()) {
+            return Optional.empty();
+        }
+        final Map<Integer, String> replacements = new LinkedHashMap<>();
+        final Set<Integer> conflicts = new HashSet<>();
+        for (ValidationIssue issue : issues) {
+            if (issue.issueType() != ValidationIssueType.UNSUPPORTED_RELATIONSHIP) {
+                continue;
+            }
+            final Optional<Integer> connectionIndex = connectionIndex(issue.path());
+            final Optional<String> replacement = safeRelationshipReplacement(issue.suggestedFix());
+            if (connectionIndex.isEmpty() || replacement.isEmpty()) {
+                continue;
+            }
+            final String previous = replacements.putIfAbsent(
+                    connectionIndex.get(), replacement.get());
+            if (previous != null && !previous.equals(replacement.get())) {
+                conflicts.add(connectionIndex.get());
             }
         }
+        conflicts.forEach(replacements::remove);
+        if (replacements.isEmpty()) {
+            return Optional.empty();
+        }
+        final Map<String, Object> repaired = mutableCopy(generated);
+        final Object connectionsValue = repaired.get("connections");
+        if (!(connectionsValue instanceof List<?> connections)) {
+            return Optional.empty();
+        }
+        boolean applied = false;
+        for (Map.Entry<Integer, String> replacement : replacements.entrySet()) {
+            final int index = replacement.getKey();
+            if (index < 0 || index >= connections.size()) {
+                continue;
+            }
+            final Object connectionValue = connections.get(index);
+            if (connectionValue instanceof Map<?, ?> connection) {
+                ((Map<String, Object>) connection).put(
+                        "relationships", List.of(replacement.getValue()));
+                applied = true;
+            }
+        }
+        return applied ? Optional.of(repaired) : Optional.empty();
+    }
+
+    private String issueFingerprint(final List<ValidationIssue> issues) {
+        return issues.stream()
+                .sorted()
+                .map(issue -> issue.issueType() + "|" + issue.componentId() + "|"
+                        + issue.path() + "|" + issue.rejectedValue())
+                .reduce("", (left, right) -> left + '\n' + right);
+    }
+
+    private Optional<Integer> connectionIndex(final String path) {
+        if (path == null || !path.startsWith("connections[")) {
+            return Optional.empty();
+        }
+        final int start = "connections[".length();
+        final int end = path.indexOf(']', start);
+        if (end <= start) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Integer.parseInt(path.substring(start, end)));
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<String> safeRelationshipReplacement(final String suggestedFix) {
+        if (suggestedFix == null) {
+            return Optional.empty();
+        }
+        final int start = suggestedFix.lastIndexOf('[');
+        final int end = suggestedFix.lastIndexOf(']');
+        if (start < 0 || end <= start) {
+            return Optional.empty();
+        }
+        final List<String> safe = java.util.Arrays.stream(suggestedFix.substring(start + 1, end).split(","))
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .filter(value -> !UNSAFE_IMPLICIT_RELATIONSHIPS.contains(value.toLowerCase(Locale.ROOT)))
+                .toList();
+        return safe.size() == 1 ? Optional.of(safe.getFirst()) : Optional.empty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mutableCopy(final Map<String, Object> source) {
+        final Map<String, Object> copy = new LinkedHashMap<>();
+        source.forEach((key, value) -> copy.put(key, mutableValue(value)));
+        return copy;
+    }
+
+    private Object mutableValue(final Object value) {
+        if (value instanceof Map<?, ?> map) {
+            final Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, nested) -> copy.put(String.valueOf(key), mutableValue(nested)));
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            final List<Object> copy = new ArrayList<>(list.size());
+            list.forEach(element -> copy.add(mutableValue(element)));
+            return copy;
+        }
+        return value;
     }
 
     private Map<String, Object> generateSpecification(
@@ -539,12 +692,60 @@ public class CopilotController {
                 VALIDATION ISSUES:
                 %s
 
+                REPAIR HINTS:
+                %s
+
                 REJECTED SPECIFICATION:
                 %s
                 """.formatted(
                 originalRequest,
                 objectMapper.valueToTree(issues),
+                repairHints(issues),
                 objectMapper.valueToTree(rejectedWithoutUsage));
+    }
+
+    private String repairHints(final List<ValidationIssue> issues) {
+        if (issues == null || issues.isEmpty()) {
+            return "- none";
+        }
+        final StringBuilder hints = new StringBuilder();
+        final int limit = Math.min(issues.size(), MAX_REPAIR_HINTS);
+        for (int index = 0; index < limit; index++) {
+            final ValidationIssue issue = issues.get(index);
+            appendBounded(hints, "- component=").append(singleLine(issue.componentId()))
+                    .append("; path=").append(singleLine(issue.path()))
+                    .append("; issue=").append(issue.issueType())
+                    .append("; capability=").append(singleLine(issue.capabilityType()))
+                    .append("; rejected=").append(singleLine(issue.rejectedValue()))
+                    .append("; fix=").append(singleLine(issue.suggestedFix()));
+            if (issue.requiredApi() != null) {
+                hints.append("; requiredApi=").append(singleLine(issue.requiredApi().type()));
+            }
+            hints.append('\n');
+            if (hints.length() >= MAX_REPAIR_HINT_CHARS) {
+                hints.setLength(MAX_REPAIR_HINT_CHARS);
+                hints.append("\n- repair hints truncated");
+                return hints.toString();
+            }
+        }
+        if (issues.size() > limit) {
+            hints.append("- ").append(issues.size() - limit).append(" additional issue(s) omitted");
+        }
+        return hints.toString();
+    }
+
+    private StringBuilder appendBounded(final StringBuilder target, final String value) {
+        if (target.length() + value.length() <= MAX_REPAIR_HINT_CHARS) {
+            target.append(value);
+        }
+        return target;
+    }
+
+    private String singleLine(final String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.replaceAll("\\s+", " ").trim();
     }
 
     private Map<String, Object> combineTokenUsage(

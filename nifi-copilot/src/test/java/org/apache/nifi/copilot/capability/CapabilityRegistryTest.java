@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -32,6 +33,35 @@ class CapabilityRegistryTest {
         assertSame(exact, registry.resolveProcessor("ConsumeMQTT").orElseThrow());
         assertSame(exact, registry.resolveProcessor("mqtt").orElseThrow());
         verify(client, times(1)).listProcessorTypes();
+    }
+
+    @Test
+    void resolvesWrongPackageFqnWhenSimpleNameIsUnique() {
+        final CapabilityRegistry registry = new CapabilityRegistry(
+                clientWithProcessor("org.apache.nifi.processors.mqtt.ConsumeMQTT"),
+                Duration.ofMinutes(5));
+
+        final ProcessorCapability resolved = registry.resolveProcessor(
+                "org.apache.nifi.processors.standard.ConsumeMQTT").orElseThrow();
+
+        assertEquals("org.apache.nifi.processors.mqtt.ConsumeMQTT", resolved.type());
+    }
+
+    @Test
+    void rejectsWrongPackageFqnWhenSimpleNameIsAmbiguous() {
+        final NiFiClientOperations client = mock(NiFiClientOperations.class);
+        when(client.listProcessorTypes()).thenReturn(List.of(
+                type("first.package.Duplicate"),
+                type("second.package.Duplicate")));
+        when(client.listControllerServiceTypes()).thenReturn(List.of());
+        when(client.getProcessorDefinition("g", "a", "1", "first.package.Duplicate"))
+                .thenReturn(Map.of("type", "first.package.Duplicate", "propertyDescriptors", Map.of()));
+        when(client.getProcessorDefinition("g", "a", "1", "second.package.Duplicate"))
+                .thenReturn(Map.of("type", "second.package.Duplicate", "propertyDescriptors", Map.of()));
+        final CapabilityRegistry registry =
+                new CapabilityRegistry(client, Duration.ofMinutes(5));
+
+        assertTrue(registry.resolveProcessor("wrong.package.Duplicate").isEmpty());
     }
 
     @Test

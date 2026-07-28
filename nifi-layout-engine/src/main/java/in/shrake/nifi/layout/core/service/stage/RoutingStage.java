@@ -21,6 +21,7 @@ import in.shrake.nifi.layout.core.service.PipelineStage;
 import in.shrake.nifi.layout.core.service.PipelineContext;
 import in.shrake.nifi.layout.core.router.RoutingStrategy;
 import in.shrake.nifi.layout.core.model.RoutingResult;
+import in.shrake.nifi.layout.core.model.RoutingWarning;
 import in.shrake.nifi.layout.core.model.Position;
 import in.shrake.nifi.layout.core.model.LayoutEdge;
 
@@ -56,8 +57,11 @@ public class RoutingStage implements PipelineStage {
                     }
                 }
             }
+            List<RoutingWarning> filteredWarnings = fullRouting.getWarnings().stream()
+                    .filter(warning -> filtered.containsKey(warning.edgeId()))
+                    .toList();
             return context.withRouting(new RoutingResult(
-                    filtered, fullRouting.getWarnings()));
+                    filtered, filteredWarnings));
         }
         
         return context.withRouting(fullRouting);

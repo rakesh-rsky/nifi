@@ -3,6 +3,7 @@ package org.apache.nifi.copilot.capability;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -10,6 +11,8 @@ import java.util.regex.Pattern;
 
 public final class FlowSpecificationValidator {
     private static final Pattern PARAMETER = Pattern.compile(".*#\\{[^}]+}.*", Pattern.DOTALL);
+    private static final Set<String> UNSAFE_IMPLICIT_RELATIONSHIPS = Set.of(
+            "failure", "original", "retry", "self", "unmatched");
     private final CapabilityRegistry registry;
 
     public FlowSpecificationValidator(final CapabilityRegistry registry) {
@@ -238,8 +241,13 @@ public final class FlowSpecificationValidator {
                     }
                 }
                 if (service == null) {
+                    final List<String> implementations =
+                            registry.controllerServiceImplementations(descriptor.requiredServiceApi());
                     issue(issues, componentId, path, "Controller service reference does not resolve",
-                            "Reference a controller_services id or unique name",
+                            implementations.isEmpty()
+                                    ? "Reference a controller_services id or unique name"
+                                    : "Create one controller_service using an exact compatible type "
+                                            + implementations + " and reference its id or unique name",
                             ValidationIssueType.UNRESOLVED_CONTROLLER_SERVICE_REFERENCE,
                             capabilityType,
                             value,
@@ -263,7 +271,8 @@ public final class FlowSpecificationValidator {
                     && dependenciesActive(descriptor, normalized, descriptors)
                     && !present.contains(descriptor.name())) {
                 issue(issues, componentId, basePath + "." + descriptor.name(), "Missing required property",
-                        "Set '" + descriptor.displayName() + "' using its internal or display name",
+                        "Set display property '" + descriptor.displayName()
+                                + "' or internal property '" + descriptor.name() + "'",
                         ValidationIssueType.MISSING_REQUIRED_PROPERTY,
                         capabilityType,
                         "",
@@ -387,7 +396,19 @@ public final class FlowSpecificationValidator {
                 continue;
             }
             final List<?> supplied = rawRelationships instanceof List<?> list ? list : List.of();
-            final List<?> relationships = supplied.isEmpty() ? List.of("success") : supplied;
+            final List<?> relationships = supplied.isEmpty()
+                    ? inferredRelationships(capability)
+                    : supplied;
+            if (relationships.isEmpty()) {
+                issue(issues, source, "connections[" + index + "].relationships",
+                        "Source relationship is required",
+                        "Use one discovered relationship: " + capability.relationships().stream().sorted().toList(),
+                        ValidationIssueType.INVALID_RELATIONSHIPS,
+                        capability.type(),
+                        "",
+                        null);
+                continue;
+            }
             connection.put("relationships", new ArrayList<>(relationships));
             final List<String> normalizedRelationships = new ArrayList<>();
             for (Object raw : relationships) {
@@ -406,6 +427,17 @@ public final class FlowSpecificationValidator {
             }
             connection.put("relationships", normalizedRelationships);
         }
+    }
+
+    private List<String> inferredRelationships(final ProcessorCapability capability) {
+        if (capability.supportsDynamicRelationships()) {
+            return List.of();
+        }
+        final List<String> safeOutputs = capability.relationships().stream()
+                .filter(relationship -> !UNSAFE_IMPLICIT_RELATIONSHIPS.contains(
+                        relationship.toLowerCase(Locale.ROOT)))
+                .toList();
+        return safeOutputs.size() == 1 ? safeOutputs : List.of();
     }
 
     private String resolveRelationship(final ProcessorCapability capability, final String requested) {

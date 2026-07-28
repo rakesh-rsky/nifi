@@ -133,6 +133,49 @@ class LlmClientTest {
     }
 
     @Test
+    void discardsNullGeneratedConnectionEntry() {
+        final Map<String, Object> specification = new LinkedHashMap<>();
+        final List<Object> connections = new ArrayList<>();
+        connections.add(null);
+        connections.add(new LinkedHashMap<>(Map.of(
+                "from", "source",
+                "to", "target",
+                "relationships", List.of("success"))));
+        specification.put("connections", connections);
+
+        final Map<String, Object> normalized =
+                new LlmClient().normalizeGeneratedLayout(specification);
+        final List<Map<String, Object>> normalizedConnections =
+                cast(normalized.get("connections"));
+
+        assertEquals(1, normalizedConnections.size());
+        assertEquals("source", normalizedConnections.getFirst().get("from"));
+        assertEquals("target", normalizedConnections.getFirst().get("to"));
+    }
+
+    @Test
+    void preservesNonNullScalarGeneratedConnectionEntry() {
+        final Map<String, Object> specification = new LinkedHashMap<>();
+        specification.put("connections", new ArrayList<>(List.of(
+                "unstructured-connection",
+                new LinkedHashMap<>(Map.of(
+                        "from", "source",
+                        "to", "target",
+                        "relationships", List.of("success"))))));
+
+        final Map<String, Object> normalized =
+                new LlmClient().normalizeGeneratedLayout(specification);
+        final List<Map<String, Object>> normalizedConnections =
+                cast(normalized.get("connections"));
+
+        assertEquals(2, normalizedConnections.size());
+        assertEquals("source", normalizedConnections.getFirst().get("from"));
+        assertEquals(
+                Map.of("value", "unstructured-connection"),
+                normalizedConnections.get(1));
+    }
+
+    @Test
     void expandsCombinedLoadRelationshipsIntoDistinctParallelWorkers() {
         final Map<String, Object> specification = new LinkedHashMap<>();
         specification.put("processors", new ArrayList<>(List.of(
